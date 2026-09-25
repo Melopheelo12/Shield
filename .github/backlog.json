@@ -1,0 +1,603 @@
+[
+  {
+    "id": "US-01",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les leurres enregistrent **toute** tentative de connexion, afin de disposer d'une trace exhaustive de ce que subit mon serveur",
+    "criteria": [
+      "Une tentative sur l'un des trois leurres produit un enregistrement avec les 8 champs obligatoires",
+      "3 000 événements injectés en 60 s ne provoquent aucune perte",
+      "un événement malformé n'interrompt jamais le service"
+    ]
+  },
+  {
+    "id": "US-02",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les leurres présentent des bannières crédibles et versionnées, afin que les robots poursuivent l'interaction au lieu de se déconnecter",
+    "criteria": [
+      "Les trois leurres répondent avec une bannière plausible et configurable",
+      "aucune chaîne « shield », « honeypot » ou « leurre » n'apparaît dans une réponse réseau"
+    ]
+  },
+  {
+    "id": "US-03",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les identifiants testés soient conservés en clair, afin d'observer les dictionnaires réellement employés contre moi",
+    "criteria": [
+      "Le couple identifiant / mot de passe est stocké tel quel, affiché dans le détail de session, et exclu de tout export public non pseudonymisé"
+    ]
+  },
+  {
+    "id": "US-04",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les tentatives d'un même attaquant soient regroupées en **session**, afin de lire une attaque comme un déroulé",
+    "criteria": [
+      "Les événements d'une même IP sur un même service séparés de moins de 5 minutes forment une seule session, portant une date de début, une date de fin et un nombre d'événements"
+    ]
+  },
+  {
+    "id": "US-05",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que le leurre ne puisse **rien exécuter ni joindre**, afin que mon serveur ne devienne jamais un relais d'attaque",
+    "criteria": [
+      "Conteneur non-root, système de fichiers en lecture seule, capacités Linux réduites",
+      "aucune route sortante depuis la zone leurre",
+      "toute tentative de sortie est refusée et journalisée"
+    ]
+  },
+  {
+    "id": "US-06",
+    "epic": "A-capture",
+    "epic_title": "Capture et journalisation",
+    "feature": "F1",
+    "priority": "Should",
+    "story": "En tant qu'**analyste**, je veux que la charge utile brute soit conservée avec une taille plafonnée, afin d'analyser une tentative d'exploitation a posteriori",
+    "criteria": [
+      "Les 4 premiers kilo-octets sont stockés",
+      "au-delà, la donnée est tronquée et marquée comme telle",
+      "le contenu n'est jamais interprété ni exécuté"
+    ]
+  },
+  {
+    "id": "US-07",
+    "epic": "B-enrichissement",
+    "epic_title": "Enrichissement et qualification",
+    "feature": "F2",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux connaître le pays et l'opérateur réseau de chaque adresse, afin de distinguer un balayage de masse d'une attention ciblée",
+    "criteria": [
+      "≥ 95 % des IP publiques portent un pays et un ASN",
+      "la résolution est hors ligne",
+      "une IP privée ou réservée est marquée sans appel externe"
+    ]
+  },
+  {
+    "id": "US-08",
+    "epic": "B-enrichissement",
+    "epic_title": "Enrichissement et qualification",
+    "feature": "F2",
+    "priority": "Must",
+    "story": "En tant qu'**analyste**, je veux un score de réputation par adresse, afin de hiérarchiser ce qui mérite mon attention",
+    "criteria": [
+      "Le score est présent et daté",
+      "le quota gratuit de 1 000 requêtes/jour n'est jamais dépassé grâce à un cache de 24 h",
+      "le taux de succès du cache est mesurable"
+    ]
+  },
+  {
+    "id": "US-09",
+    "epic": "B-enrichissement",
+    "epic_title": "Enrichissement et qualification",
+    "feature": "F2",
+    "priority": "Must",
+    "story": "En tant qu'**étudiant**, je veux que chaque tentative soit rattachée à une technique **MITRE ATT&CK**, afin de nommer ce que j'observe avec le vocabulaire du métier",
+    "criteria": [
+      "Chaque événement porte un identifiant de technique ou la valeur explicite « non classé »",
+      "la règle de correspondance est documentée et testée unitairement"
+    ]
+  },
+  {
+    "id": "US-10",
+    "epic": "B-enrichissement",
+    "epic_title": "Enrichissement et qualification",
+    "feature": "F2",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que l'indisponibilité d'un service tiers **ne bloque jamais** la capture, afin de ne perdre aucune donnée",
+    "criteria": [
+      "Si l'API de réputation ne répond pas, l'événement est stocké non enrichi puis complété automatiquement",
+      "aucun événement perdu ni rejeté",
+      "l'incident est journalisé"
+    ]
+  },
+  {
+    "id": "US-11",
+    "epic": "B-enrichissement",
+    "epic_title": "Enrichissement et qualification",
+    "feature": "F2",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que l'enrichissement s'exécute en **moins de 2 secondes**, afin que le tableau de bord reste réellement temps réel",
+    "criteria": [
+      "Délai médian capture → événement enrichi inférieur à 2 s",
+      "l'enrichissement est asynchrone et ne bloque jamais l'ingestion"
+    ]
+  },
+  {
+    "id": "US-12",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux un **score de menace** par session, afin de savoir en un chiffre ce qui mérite que je m'y attarde",
+    "criteria": [
+      "Chaque session close porte un score de 0 à 100",
+      "le score est recalculé à chaque événement",
+      "les sessions sont triables par score décroissant"
+    ]
+  },
+  {
+    "id": "US-13",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux voir **quelles règles** ont produit ce score, afin de ne jamais avoir à faire confiance à une boîte noire",
+    "criteria": [
+      "Le détail de session liste chaque règle déclenchée, son libellé en français, son poids et sa contribution au score total",
+      "la somme des contributions égale le score affiché"
+    ]
+  },
+  {
+    "id": "US-14",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Must",
+    "story": "En tant qu'**analyste**, je veux que l'agent classe l'attaquant dans un **profil** — balayage opportuniste, force brute ciblée, tentative d'exploitation — afin de traiter différemment ce qui est différent",
+    "criteria": [
+      "Toute session close reçoit un profil parmi une liste fermée et documentée, ou « indéterminé »",
+      "le profil est justifié par les règles déclenchées"
+    ]
+  },
+  {
+    "id": "US-15",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que le verdict de l'agent soit **reproductible**, afin de pouvoir le tester et le défendre",
+    "criteria": [
+      "Le même jeu d'événements rejoué produit exactement le même score et le même profil",
+      "aucune source d'aléa, aucune dépendance à l'horloge autre que les fenêtres explicites"
+    ]
+  },
+  {
+    "id": "US-16",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Should",
+    "story": "En tant qu'**opérateur**, je veux **activer, désactiver ou pondérer** une règle sans redéployer, afin d'adapter la détection à mon contexte",
+    "criteria": [
+      "Les règles sont modifiables depuis l'interface",
+      "un changement prend effet sans redémarrage",
+      "chaque modification incrémente la version de la règle et est journalisée"
+    ]
+  },
+  {
+    "id": "US-17",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Should",
+    "story": "En tant qu'**étudiant**, je veux que chaque règle soit **expliquée en langage clair**, afin d'apprendre ce que l'agent détecte et pourquoi",
+    "criteria": [
+      "Chaque règle porte une description d'une à trois phrases, sans jargon, visible dans l'interface"
+    ]
+  },
+  {
+    "id": "US-18",
+    "epic": "C-agent-defenseur",
+    "epic_title": "Agent défenseur",
+    "feature": "F3",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que l'agent **tienne le débit** de capture, afin qu'il ne devienne jamais le goulot d'étranglement",
+    "criteria": [
+      "L'évaluation d'un événement prend moins de 50 ms au 95e centile",
+      "sous charge de 50 év./s, la file d'attente de l'agent ne croît pas de façon monotone"
+    ]
+  },
+  {
+    "id": "US-19",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux m'authentifier avant d'accéder au tableau de bord, afin que les données collectées ne soient pas publiques",
+    "criteria": [
+      "Toute route est inaccessible sans jeton valide",
+      "le jeton expire",
+      "5 échecs consécutifs déclenchent un ralentissement progressif",
+      "accès exclusivement en HTTPS"
+    ]
+  },
+  {
+    "id": "US-20",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux voir les attaques apparaître **en direct**, afin de constater l'activité sans recharger la page",
+    "criteria": [
+      "Un nouvel événement s'affiche en moins de 5 s après sa capture",
+      "la connexion se rétablit automatiquement après une coupure",
+      "l'absence de connexion est signalée visuellement"
+    ]
+  },
+  {
+    "id": "US-21",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux une **carte mondiale** des origines, afin de saisir la situation en un coup d'œil",
+    "criteria": [
+      "Un marqueur agrégé par pays",
+      "le survol donne le décompte",
+      "le clic filtre l'ensemble du tableau de bord"
+    ]
+  },
+  {
+    "id": "US-22",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux une **chronologie** du volume d'attaques, afin de repérer les pics et les changements de rythme",
+    "criteria": [
+      "Périodes 24 h, 7 j et 30 j",
+      "granularité adaptée à la période",
+      "une sélection sur la chronologie filtre les autres visualisations"
+    ]
+  },
+  {
+    "id": "US-23",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**analyste**, je veux le **top 10 des adresses IP**, afin d'identifier les acteurs les plus insistants",
+    "criteria": [
+      "Classement sur la période sélectionnée",
+      "pays, ASN, réputation, score de menace et nombre d'événements par ligne",
+      "le clic ouvre le détail"
+    ]
+  },
+  {
+    "id": "US-24",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**étudiant**, je veux le **top 10 des identifiants** testés, afin de comprendre quels comptes sont réellement visés",
+    "criteria": [
+      "Identifiants et mots de passe distingués",
+      "calcul sur la période sélectionnée"
+    ]
+  },
+  {
+    "id": "US-25",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux la **répartition par service** leurre, afin de savoir lequel attire le plus",
+    "criteria": [
+      "Répartition SSH / HTTP / FTP en valeur absolue et en pourcentage"
+    ]
+  },
+  {
+    "id": "US-26",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**analyste**, je veux ouvrir le **détail d'une session**, afin de lire le déroulé complet d'une attaque",
+    "criteria": [
+      "Événements horodatés dans l'ordre, identifiants testés, charge utile tronquée, contexte d'enrichissement et règles déclenchées"
+    ]
+  },
+  {
+    "id": "US-27",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Should",
+    "story": "En tant qu'**opérateur**, je veux **filtrer** par période, pays, service, profil et adresse, afin d'isoler ce qui m'intéresse",
+    "criteria": [
+      "Filtres combinables",
+      "état reflété dans l'URL donc partageable",
+      "remise à zéro en un clic"
+    ]
+  },
+  {
+    "id": "US-28",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux consulter le tableau de bord depuis mon **téléphone**, afin de vérifier l'activité sans être devant mon poste",
+    "criteria": [
+      "Lisible et utilisable à partir de 375 px",
+      "aucune visualisation n'impose de défilement horizontal de la page"
+    ]
+  },
+  {
+    "id": "US-29",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Should",
+    "story": "En tant qu'**opérateur**, je veux voir l'**état de santé** du système, afin de savoir si mes leurres tournent réellement",
+    "criteria": [
+      "Indicateur par leurre, date du dernier événement reçu, état de la connexion temps réel, quotas des API externes"
+    ]
+  },
+  {
+    "id": "US-30",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux être **alerté** quand l'activité franchit un seuil, afin de réagir sans surveiller l'écran",
+    "criteria": [
+      "Alerte par webhook Discord au franchissement",
+      "**exactement une fois** par franchissement",
+      "contient la règle, la valeur observée et un lien vers la vue filtrée"
+    ]
+  },
+  {
+    "id": "US-31",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux **configurer** mes seuils, afin d'adapter la sensibilité à mon contexte",
+    "criteria": [
+      "Seuil, fenêtre temporelle, canal et période de silence modifiables depuis l'interface",
+      "un bouton « tester » envoie une notification factice"
+    ]
+  },
+  {
+    "id": "US-32",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Should",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux recevoir les alertes par **courriel**, afin de ne pas dépendre d'une messagerie d'équipe",
+    "criteria": [
+      "Courriel envoyé au destinataire configuré",
+      "l'échec d'un canal est journalisé et ne bloque pas les autres"
+    ]
+  },
+  {
+    "id": "US-33",
+    "epic": "D-tableau-de-bord",
+    "epic_title": "Tableau de bord temps réel et alertes",
+    "feature": "F4",
+    "priority": "Could",
+    "story": "En tant qu'**opérateur**, je veux un **thème sombre**, afin de consulter l'outil confortablement en supervision prolongée",
+    "criteria": [
+      "Suit la préférence système, modifiable manuellement, persiste entre deux visites"
+    ]
+  },
+  {
+    "id": "US-34",
+    "epic": "E-sandbox",
+    "epic_title": "Sandbox attaque-défense",
+    "feature": "F5",
+    "priority": "Should",
+    "story": "En tant que **joueur sandbox**, je veux démarrer un environnement d'entraînement **en une commande**, afin de m'exercer sans toucher à l'instance de production",
+    "criteria": [
+      "Une commande démarre leurres, collecteur, agent et tableau de bord sur une base de données distincte",
+      "l'environnement est prêt en moins de 3 minutes"
+    ]
+  },
+  {
+    "id": "US-35",
+    "epic": "E-sandbox",
+    "epic_title": "Sandbox attaque-défense",
+    "feature": "F5",
+    "priority": "Must",
+    "story": "En tant que **joueur sandbox**, je veux que l'environnement soit **totalement isolé**, afin qu'aucune action d'entraînement ne sorte de ma machine",
+    "criteria": [
+      "Le réseau sandbox est déclaré `internal` : aucune route vers Internet ni vers l'instance de production",
+      "le démarrage échoue explicitement si la variable d'environnement indique un hôte exposé"
+    ]
+  },
+  {
+    "id": "US-36",
+    "epic": "E-sandbox",
+    "epic_title": "Sandbox attaque-défense",
+    "feature": "F5",
+    "priority": "Should",
+    "story": "En tant que **joueur défenseur**, je veux voir en direct ce que l'attaquant déclenche, afin d'apprendre à lire les signaux et à ajuster mes règles",
+    "criteria": [
+      "Les événements de la sandbox apparaissent dans le tableau de bord sandbox avec la même latence qu'en production",
+      "le défenseur peut modifier une règle en cours de partie"
+    ]
+  },
+  {
+    "id": "US-37",
+    "epic": "E-sandbox",
+    "epic_title": "Sandbox attaque-défense",
+    "feature": "F5",
+    "priority": "Should",
+    "story": "En tant que **joueur sandbox**, je veux un **rapport de fin de partie**, afin de mesurer objectivement ce que l'agent a vu et ce qu'il a manqué",
+    "criteria": [
+      "Le rapport donne le nombre d'actions de l'attaquant, le nombre détecté, le taux de détection et la liste des actions non détectées"
+    ]
+  },
+  {
+    "id": "US-38",
+    "epic": "E-sandbox",
+    "epic_title": "Sandbox attaque-défense",
+    "feature": "F5",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les données de sandbox **ne contaminent jamais** les statistiques réelles, afin que ma démonstration reste honnête",
+    "criteria": [
+      "Base de données séparée",
+      "tout enregistrement issu de la sandbox porte un marqueur",
+      "aucun export de production ne contient de donnée de sandbox"
+    ]
+  },
+  {
+    "id": "US-39",
+    "epic": "F-veille",
+    "epic_title": "Agent de veille",
+    "feature": "F6",
+    "priority": "Should",
+    "story": "En tant qu'**amateur auto-hébergeur**, je veux être informé des **vulnérabilités récentes activement exploitées**, afin de savoir ce qui menace réellement mes services",
+    "criteria": [
+      "L'agent récupère quotidiennement les CVE récentes et le catalogue des vulnérabilités activement exploitées",
+      "les entrées sont consultables dans l'interface"
+    ]
+  },
+  {
+    "id": "US-40",
+    "epic": "F-veille",
+    "epic_title": "Agent de veille",
+    "feature": "F6",
+    "priority": "Should",
+    "story": "En tant qu'**analyste**, je veux que la veille soit **corrélée à mes propres observations**, afin de distinguer le bruit de ce qui me concerne",
+    "criteria": [
+      "Une CVE dont la signature correspond à une charge utile observée est marquée « observée chez vous », avec le nombre d'événements concernés et un lien vers ceux-ci"
+    ]
+  },
+  {
+    "id": "US-41",
+    "epic": "F-veille",
+    "epic_title": "Agent de veille",
+    "feature": "F6",
+    "priority": "Should",
+    "story": "En tant qu'**opérateur**, je veux que la veille **ne consomme aucun quota critique** ni ne ralentisse le reste, afin qu'elle reste une fonctionnalité d'agrément",
+    "criteria": [
+      "Exécution planifiée une fois par jour, hors des heures de forte activité",
+      "un échec de récupération est journalisé et sans effet sur les autres composants"
+    ]
+  },
+  {
+    "id": "US-42",
+    "epic": "G-export",
+    "epic_title": "Export et liste de blocage",
+    "feature": "F7",
+    "priority": "Should",
+    "story": "En tant qu'**analyste**, je veux **exporter** les événements en CSV et JSON, afin de les exploiter dans mes propres outils",
+    "criteria": [
+      "L'export respecte les filtres actifs",
+      "les colonnes sont documentées",
+      "au-delà d'un volume défini, l'export est produit par lots sans saturer la mémoire"
+    ]
+  },
+  {
+    "id": "US-43",
+    "epic": "G-export",
+    "epic_title": "Export et liste de blocage",
+    "feature": "F7",
+    "priority": "Should",
+    "story": "En tant qu'**analyste**, je veux une **liste d'adresses hostiles** des 7 derniers jours, afin de l'injecter dans mon pare-feu",
+    "criteria": [
+      "Une adresse par ligne, sans en-tête ni commentaire",
+      "liste reproductible et datée",
+      "seuil de score configurable"
+    ]
+  },
+  {
+    "id": "US-44",
+    "epic": "G-export",
+    "epic_title": "Export et liste de blocage",
+    "feature": "F7",
+    "priority": "Could",
+    "story": "En tant qu'**analyste**, je veux **interroger l'API** avec un jeton dédié, afin d'automatiser ma collecte",
+    "criteria": [
+      "Jeton en lecture seule créable et révocable",
+      "réponses JSON documentées",
+      "quota par jeton"
+    ]
+  },
+  {
+    "id": "US-45",
+    "epic": "H-deploiement",
+    "epic_title": "Déploiement et conformité",
+    "feature": "transverse",
+    "priority": "Must",
+    "story": "En tant qu'**étudiant**, je veux installer SHIELD en **une commande et moins de dix minutes**, afin de commencer à collecter le jour même",
+    "criteria": [
+      "`docker compose up` suffit après copie d'un fichier d'environnement d'exemple",
+      "deux personnes extérieures réussissent l'installation, guide en main, en moins de 10 minutes"
+    ]
+  },
+  {
+    "id": "US-46",
+    "epic": "H-deploiement",
+    "epic_title": "Déploiement et conformité",
+    "feature": "transverse",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que les données soient **purgées automatiquement** au-delà de la durée de conservation, afin de rester conforme sans intervention",
+    "criteria": [
+      "Purge quotidienne",
+      "durée configurable, 12 mois par défaut",
+      "chaque purge journalisée avec volume supprimé et date de coupure"
+    ]
+  },
+  {
+    "id": "US-47",
+    "epic": "H-deploiement",
+    "epic_title": "Déploiement et conformité",
+    "feature": "transverse",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux pouvoir **pseudonymiser** les adresses dans ce que je publie, afin de partager mes observations sans exposer de donnée personnelle",
+    "criteria": [
+      "Un mode tronque le dernier octet des adresses IPv4 sur toute donnée destinée à la publication",
+      "le mode est explicite et ne s'applique jamais silencieusement"
+    ]
+  },
+  {
+    "id": "US-48",
+    "epic": "H-deploiement",
+    "epic_title": "Déploiement et conformité",
+    "feature": "transverse",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux une **procédure d'arrêt d'urgence**, afin de couper l'exposition immédiatement en cas de doute",
+    "criteria": [
+      "Une commande unique arrête les leurres en conservant les données",
+      "la procédure est documentée et testée au moins une fois avant la soutenance"
+    ]
+  },
+  {
+    "id": "US-49",
+    "epic": "H-deploiement",
+    "epic_title": "Déploiement et conformité",
+    "feature": "transverse",
+    "priority": "Must",
+    "story": "En tant qu'**opérateur**, je veux que l'instance **ne contienne aucun secret réutilisable**, afin qu'une compromission du serveur ne donne accès à rien d'autre",
+    "criteria": [
+      "Aucune clé SSH personnelle, aucun identifiant d'un autre système sur l'hôte exposé",
+      "les secrets applicatifs proviennent de variables d'environnement absentes du dépôt",
+      "une analyse de secrets tourne en intégration continue"
+    ]
+  }
+]
