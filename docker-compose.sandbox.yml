@@ -1,0 +1,64 @@
+# =============================================================================
+# SHIELD — environnement SANDBOX (entrainement attaque / defense)
+#
+#   ./scripts/sandbox.sh start
+#
+# Garde-fous, dans cet ordre :
+#   1. le script refuse de demarrer si SHIELD_ENV=prod
+#   2. sandbox_net est "internal" : aucune route vers Internet ni vers la prod
+#   3. la base de donnees est distincte de celle de production (US-38)
+#
+# Le conteneur "attacker" contient des outils d'audit standard. Ils ne visent
+# QUE les leurres de cette sandbox, c'est-a-dire nos propres systemes, sur un
+# reseau sans aucune sortie.
+# =============================================================================
+
+name: shield-sandbox
+
+services:
+  sandbox-collector:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.collector
+    environment:
+      SHIELD_ENV: sandbox
+      INGEST_TOKEN: sandbox-token
+      DATABASE_URL: postgresql+asyncpg://shield:sandbox@sandbox-postgres:5432/shield_sandbox
+      REDIS_URL: redis://sandbox-redis:6379/0
+      SANDBOX_RUN: "true"
+    volumes: ["./rules:/app/rules:ro"]
+    networks: [sandbox_net]
+
+  sandbox-decoy-ssh:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.decoy
+    command: ["python", "-m", "shield.decoys.runner", "ssh", "--port", "2222"]
+    environment:
+      COLLECTOR_INGEST_URL: http://sandbox-collector:8000/api/v1/ingest
+      INGEST_TOKEN: sandbox-token
+    read_only: true
+    cap_drop: [ALL]
+    networks: [sandbox_net]
+
+  sandbox-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shield
+      POSTGRES_PASSWORD: sandbox
+      POSTGRES_DB: shield_sandbox
+    networks: [sandbox_net]
+
+  sandbox-redis:
+    image: redis:7-alpine
+    networks: [sandbox_net]
+
+  attacker:
+    image: alpine:3.20
+    command: ["sleep", "infinity"]
+    networks: [sandbox_net]
+    # Outils installes a la demande dans le conteneur, jamais dans l'image du depot.
+
+networks:
+  sandbox_net:
+    internal: true      # LE garde-fou structurel de la sandbox

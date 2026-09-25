@@ -1,0 +1,139 @@
+# =============================================================================
+# SHIELD — production / demonstration
+#
+# Cinq reseaux, quatre zones de confiance. Le point essentiel :
+# la zone leurre n'a AUCUNE route sortante (decoy_net et ingest_net sont
+# declares "internal"). C'est une propriete du reseau Docker, pas une regle de
+# pare-feu que l'on peut oublier de charger.
+#
+#   docker compose up -d           demarre la pile
+#   docker compose stop decoy-ssh decoy-http decoy-ftp    arret d'urgence
+# =============================================================================
+
+x-decoy-hardening: &decoy-hardening
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile.decoy
+  restart: unless-stopped
+  read_only: true
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=8m,mode=1777
+  deploy:
+    resources:
+      limits: { cpus: "0.25", memory: 128M }
+  environment:
+    COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
+    INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
+  networks: [decoy_net, ingest_net]
+  depends_on: [collector]
+
+services:
+  # ------------------------------------------------------------- ZONE LEURRE
+  decoy-ssh:
+    <<: *decoy-hardening
+    container_name: shield-decoy-ssh
+    command: ["python", "-m", "shield.decoys.runner", "ssh", "--port", "2222"]
+    environment:
+      COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
+      INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
+      DECOY_SSH_BANNER: ${DECOY_SSH_BANNER:-SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4}
+    ports: ["${DECOY_SSH_PORT:-22}:2222"]
+
+  decoy-http:
+    <<: *decoy-hardening
+    container_name: shield-decoy-http
+    command: ["python", "-m", "shield.decoys.runner", "http", "--port", "8080"]
+    ports: ["${DECOY_HTTP_PORT:-80}:8080"]
+
+  decoy-ftp:
+    <<: *decoy-hardening
+    container_name: shield-decoy-ftp
+    command: ["python", "-m", "shield.decoys.runner", "ftp", "--port", "2121"]
+    environment:
+      COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
+      INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
+      DECOY_FTP_BANNER: ${DECOY_FTP_BANNER:-220 (vsFTPd 3.0.5)}
+    ports: ["${DECOY_FTP_PORT:-21}:2121"]
+
+  # --------------------------------------------------------- ZONE TRAITEMENT
+  collector:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.collector
+    container_name: shield-collector
+    restart: unless-stopped
+    user: "10002:10002"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=32m"]
+    env_file: [.env]
+    volumes:
+      - ./rules:/app/rules:ro
+      - geolite2:/data/geolite2:ro
+    networks: [ingest_net, core_net, data_net, web_net]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ------------------------------------------------------------ ZONE DONNEES
+  postgres:
+    image: postgres:16-alpine
+    container_name: shield-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shield}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      POSTGRES_DB: ${POSTGRES_DB:-shield}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [data_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shield}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: shield-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [data_net]
+
+  # ------------------------------------------------------- ZONE PRESENTATION
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: shield-nginx
+    restart: unless-stopped
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./dashboard/dist:/usr/share/nginx/html:ro
+      - certs:/etc/letsencrypt:ro
+    ports: ["8443:8443"]
+    networks: [web_net]
+    depends_on: [collector]
+
+networks:
+  decoy_net:
+    internal: true      # AUCUNE route vers Internet depuis la zone leurre
+  ingest_net:
+    internal: true      # seule route autorisee hors de la zone leurre
+  core_net: {}          # sortie Internet, restreinte par liste blanche au niveau hote
+  data_net:
+    internal: true
+  web_net: {}
+
+volumes:
+  pgdata: {}
+  geolite2: {}
+  certs: {}
