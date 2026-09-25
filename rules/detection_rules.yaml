@@ -1,0 +1,249 @@
+# =============================================================================
+# SHIELD — Règles de détection de l'agent défenseur
+#
+# Chaque règle porte une description en langage clair (US-17) : elle est affichée
+# telle quelle dans l'interface, à destination d'un utilisateur non expert.
+#
+# Champs :
+#   id            identifiant stable, jamais réutilisé
+#   name          nom court en kebab-case, anglais, utilisé dans le code
+#   description   une à trois phrases, en français, sans jargon
+#   severity      low | medium | high | critical
+#   weight        points ajoutés au score de menace (le total est plafonné à 100)
+#   window_seconds fenêtre du compteur utilisé, 0 si la règle ne dépend pas du temps
+#   profile_hint  profil d'attaquant suggéré si cette règle se déclenche
+#   condition     arbre all / any / not / comparaison
+#
+# Opérateurs : eq, ne, gte, lte, in, contains, is_empty
+# Champs de contexte : service, source_ip, dest_port, username, password, payload,
+#   country_code, asn, reputation_score, technique_id, counter.<nom>
+# =============================================================================
+
+- id: R-001
+  name: known-default-credentials
+  description: >
+    Le couple identifiant / mot de passe testé fait partie des combinaisons par
+    défaut les plus répandues. C'est la première chose qu'un robot essaie.
+  severity: medium
+  weight: 20
+  profile_hint: force_brute_ciblee
+  condition:
+    all:
+      - field: username
+        op: in
+        value: [root, admin, administrator, user, test, ubuntu, pi, oracle, postgres, ftp]
+      - field: password
+        op: in
+        value: ["123456", "password", "admin", "root", "12345678", "qwerty", "1234", "toor", "raspberry", ""]
+
+- id: R-002
+  name: root-account-targeted
+  description: >
+    La tentative vise directement le compte administrateur de la machine.
+    Un usage légitime passe rarement par ce compte.
+  severity: medium
+  weight: 15
+  profile_hint: force_brute_ciblee
+  condition:
+    field: username
+    op: in
+    value: [root, administrator, admin]
+
+- id: R-003
+  name: bad-reputation-address
+  description: >
+    L'adresse source est déjà signalée par une base de réputation publique comme
+    ayant participé à des attaques récentes.
+  severity: medium
+  weight: 17
+  condition:
+    field: reputation_score
+    op: gte
+    value: 50
+
+- id: R-004
+  name: very-bad-reputation-address
+  description: >
+    L'adresse source est massivement signalée. Elle appartient très probablement à
+    un réseau de machines compromises utilisé pour des balayages automatisés.
+  severity: high
+  weight: 25
+  profile_hint: balayage_opportuniste
+  condition:
+    field: reputation_score
+    op: gte
+    value: 85
+
+- id: R-005
+  name: silent-port-probe
+  description: >
+    La connexion a été ouverte puis refermée sans envoyer d'identifiant. C'est la
+    signature d'un balayage de ports qui cherche seulement à savoir quels services
+    répondent.
+  severity: low
+  weight: 8
+  profile_hint: balayage_opportuniste
+  condition:
+    all:
+      - field: username
+        op: is_empty
+        value: true
+      - field: password
+        op: is_empty
+        value: true
+
+- id: R-006
+  name: multi-service-sweep
+  description: >
+    La même adresse a touché plusieurs de nos services leurres en quelques minutes.
+    Elle cartographie la machine plutôt que de viser un service précis.
+  severity: medium
+  weight: 18
+  window_seconds: 300
+  profile_hint: balayage_opportuniste
+  condition:
+    field: counter.distinct_services_by_ip
+    op: gte
+    value: 2
+
+- id: R-007
+  name: ssh-bruteforce
+  description: >
+    Plus de vingt tentatives d'authentification depuis la même adresse sur le leurre
+    SSH en moins de cinq minutes. C'est le signe d'un dictionnaire automatisé, pas
+    d'une erreur de saisie.
+  severity: high
+  weight: 35
+  window_seconds: 300
+  profile_hint: force_brute_ciblee
+  condition:
+    all:
+      - field: service
+        op: eq
+        value: ssh
+      - field: counter.auth_attempts_by_ip
+        op: gte
+        value: 20
+
+- id: R-008
+  name: sustained-bruteforce
+  description: >
+    Plus de cent tentatives depuis la même adresse en cinq minutes. Le rythme est
+    industriel : l'attaquant dispose d'une infrastructure dédiée.
+  severity: critical
+  weight: 55
+  window_seconds: 300
+  profile_hint: force_brute_ciblee
+  condition:
+    field: counter.auth_attempts_by_ip
+    op: gte
+    value: 100
+
+- id: R-009
+  name: path-traversal-attempt
+  description: >
+    La requête contient une séquence de remontée de répertoire, utilisée pour tenter
+    de lire des fichiers en dehors du dossier prévu.
+  severity: high
+  weight: 40
+  profile_hint: tentative_exploitation
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "../"
+      - field: payload
+        op: contains
+        value: "..%2f"
+
+- id: R-010
+  name: command-injection-attempt
+  description: >
+    La requête contient des motifs d'injection de commande système. L'attaquant
+    cherche à faire exécuter ses propres instructions par le serveur.
+  severity: critical
+  weight: 60
+  profile_hint: tentative_exploitation
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: ";wget "
+      - field: payload
+        op: contains
+        value: ";curl "
+      - field: payload
+        op: contains
+        value: "$(("
+      - field: payload
+        op: contains
+        value: "/bin/sh"
+
+- id: R-011
+  name: sql-injection-attempt
+  description: >
+    La requête contient des motifs d'injection SQL classiques, visant à détourner
+    une requête de base de données.
+  severity: high
+  weight: 40
+  profile_hint: tentative_exploitation
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "' or '1'='1"
+      - field: payload
+        op: contains
+        value: "union select"
+      - field: payload
+        op: contains
+        value: "sleep("
+
+- id: R-012
+  name: automated-client-signature
+  description: >
+    Le client s'annonce avec la signature d'un outil d'automatisation ou de balayage
+    connu. Aucun navigateur ni client légitime ne se présente ainsi.
+  severity: medium
+  weight: 15
+  profile_hint: balayage_opportuniste
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "libssh"
+      - field: payload
+        op: contains
+        value: "zgrab"
+      - field: payload
+        op: contains
+        value: "masscan"
+      - field: payload
+        op: contains
+        value: "python-requests"
+
+- id: R-013
+  name: oversized-payload
+  description: >
+    La charge utile dépasse la taille que nous conservons. Un volume anormal est
+    souvent une tentative de débordement de mémoire tampon.
+  severity: medium
+  weight: 20
+  profile_hint: tentative_exploitation
+  condition:
+    field: payload_truncated
+    op: eq
+    value: true
+
+- id: R-014
+  name: repeat-offender
+  description: >
+    Cette adresse revient après avoir déjà été observée aujourd'hui. Elle ne fait
+    pas que passer : elle insiste.
+  severity: low
+  weight: 10
+  window_seconds: 86400
+  condition:
+    field: counter.events_by_ip_24h
+    op: gte
+    value: 50
