@@ -30,6 +30,9 @@ READ_LIMIT_BYTES = 64 * 1024
 #: Un client qui ne parle pas est déconnecté : les sockets ouverts sont une ressource.
 IDLE_TIMEOUT_SECONDS = 10.0
 
+#: Pair de repli quand l'adresse du client est indisponible. Ce n'est pas une écoute.
+_UNKNOWN_PEER = ("0.0.0.0", 0)  # noqa: S104  # nosec B104
+
 
 class DecoyService(ABC):
     """Écouter, dialoguer le strict minimum, journaliser, refuser."""
@@ -58,8 +61,14 @@ class DecoyService(ABC):
 
     async def start(self) -> None:
         self._client = self._client or httpx.AsyncClient(timeout=5.0)
+        # Un leurre DOIT écouter sur toutes les interfaces : c'est sa raison d'être.
+        # Le risque habituel de B104 (exposer un service interne) ne s'applique pas ici :
+        # le conteneur tourne en non-root, en lecture seule, et decoy_net est déclaré
+        # `internal` — aucune route sortante n'existe depuis cette zone.
         self._server = await asyncio.start_server(
-            self._guarded_connection, host="0.0.0.0", port=self.port  # noqa: S104
+            self._guarded_connection,
+            host="0.0.0.0",  # noqa: S104  # nosec B104
+            port=self.port,
         )
         logger.info("decoy %s listening on port %s", self.service.value, self.port)
 
@@ -126,7 +135,7 @@ class DecoyService(ABC):
         payload: bytes = b"",
     ) -> RawEvent:
         """Construit un événement conforme au contrat, charge utile déjà plafonnée."""
-        peer = writer.get_extra_info("peername") or ("0.0.0.0", 0)  # noqa: S104
+        peer = writer.get_extra_info("peername") or _UNKNOWN_PEER
         source_ip, source_port = peer[0], peer[1]
         event = RawEvent(
             service=self.service,
