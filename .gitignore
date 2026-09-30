@@ -17,3 +17,6 @@ data/
 geolite2/
 *.mmdb
 .DS_Store
+
+# Artefacts de build
+*.egg-info/
