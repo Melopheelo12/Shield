@@ -157,7 +157,9 @@ unattended-upgrade --dry-run >/dev/null || die "unattended-upgrades mal configur
 # ------------------------------------------------------------------ aucun secret
 
 step "Verification : aucun secret sur la machine"
-found="$(grep -rlsE -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' /root /home 2>/dev/null || true)"
+# node_modules et .venv embarquent parfois des cles de test : hors perimetre.
+found="$(grep -rlsE --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.git \
+  -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' /root /home 2>/dev/null || true)"
 if [[ -n "$found" ]]; then
   echo "$found" >&2
   die "cle(s) privee(s) trouvee(s) ci-dessus : supprimez-les, ce serveur sera attaque."
