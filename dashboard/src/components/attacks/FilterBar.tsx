@@ -62,6 +62,8 @@ export function FilterBar({ filters, onChange, onReset }: Props) {
           size={3}
           value={country}
           onChange={(event) => onCountryInput(event.target.value)}
+          // Une seule lettre n'est pas un filtre : on réaffiche celui qui s'applique.
+          onBlur={() => setCountry(filters.country)}
           aria-describedby="filter-country-hint"
         />
         <span id="filter-country-hint" className="visually-hidden">
