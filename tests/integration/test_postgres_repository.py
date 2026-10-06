@@ -11,6 +11,7 @@ from sqlalchemy import text
 from shield.collector.api import app as api
 from shield.collector.defender import DefenderAgent, RuleEngine
 from shield.collector.enrichment.mitre import MitreMapper
+from shield.collector.ingest.session_tracker import SessionTracker
 from shield.collector.repositories import PostgresEventRepository
 from shield.common.schema import EnrichmentStatus, NormalizedEvent, RawEvent
 
@@ -205,6 +206,66 @@ async def test_prepare_est_idempotente_et_suit_le_fichier_de_regles(repository, 
         key=rules[0].id,
     )
     assert (count, weight, version) == (len(rules), rules[0].weight + 1, 2)
+
+
+async def test_la_session_garde_sa_derniere_activite(repository, pg_engine):
+    session_id = uuid4()
+    now = datetime.now(UTC)
+    await capture(repository, session_id=session_id, occurred_at=now - timedelta(minutes=3))
+    await capture(repository, session_id=session_id, occurred_at=now - timedelta(minutes=1))
+
+    started, ended, closed = await fetch_one(
+        pg_engine, "SELECT started_at, ended_at, closed FROM session WHERE id = :id", id=session_id
+    )
+    assert (ended - started, closed) == (timedelta(minutes=2), False)
+
+
+async def test_seules_les_sessions_inactives_sont_fermees(repository, pg_engine):
+    now = datetime.now(UTC)
+    idle, active, legacy = uuid4(), uuid4(), uuid4()
+    await capture(repository, session_id=idle, occurred_at=now - timedelta(minutes=10))
+    await capture(repository, session_id=active, occurred_at=now - timedelta(minutes=1))
+    await capture(repository, session_id=legacy, occurred_at=now - timedelta(minutes=20))
+    async with pg_engine.begin() as conn:  # session écrite avant #58 : ended_at absent
+        await conn.execute(
+            text("UPDATE session SET ended_at = NULL WHERE id = :id"), {"id": legacy}
+        )
+
+    assert await repository.close_idle_sessions(now - timedelta(minutes=5)) == 2
+    assert [s.session_id for s in await repository.open_sessions()] == [active]
+
+    closed, ended = await fetch_one(
+        pg_engine, "SELECT closed, ended_at FROM session WHERE id = :id", id=legacy
+    )
+    assert closed and ended is not None
+
+
+async def test_une_session_survit_au_redemarrage_du_collecteur(repository, pg_engine):
+    """#58 : un événement reçu après un redémarrage rejoint la session en cours."""
+    api.app.state.repository = repository
+    headers = {"X-Ingest-Token": api.INGEST_TOKEN}
+    body = dict(service="ssh", source_ip="203.0.113.77", source_port=40000, dest_port=22)
+    tracker = api.tracker
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=api.app), base_url="http://test"
+        ) as client:
+            api.tracker = SessionTracker()
+            first = (await client.post("/api/v1/ingest", json=body, headers=headers)).json()
+            await client.post("/api/v1/ingest", json=body, headers=headers)
+
+            api.tracker = SessionTracker()  # redémarrage : la mémoire est perdue
+            await api.resume_sessions(repository, api.tracker)
+            third = (await client.post("/api/v1/ingest", json=body, headers=headers)).json()
+    finally:
+        api.tracker = tracker
+        del api.app.state.repository
+
+    assert third["session_id"] == first["session_id"]
+    count, closed = await fetch_one(
+        pg_engine, "SELECT event_count, closed FROM session WHERE id = :id", id=first["session_id"]
+    )
+    assert (count, closed) == (3, False)
 
 
 async def test_chaine_complete_ingestion_vers_verdict(repository):

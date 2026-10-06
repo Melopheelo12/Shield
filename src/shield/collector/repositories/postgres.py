@@ -21,12 +21,14 @@ from datetime import UTC, date, datetime, timedelta
 from ipaddress import ip_address
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, func, insert, or_, select, text
+from sqlalchemy import and_, case, distinct, func, insert, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql import ColumnElement
 
 from shield.collector.defender import Rule
+from shield.collector.ingest.session_tracker import ResumedSession
 from shield.collector.models import (
     DecoyService,
     DetectionRule,
@@ -186,6 +188,7 @@ class PostgresEventRepository:
                     source_ip=ip,
                     service_id=service_id,
                     started_at=seen_at,
+                    ended_at=seen_at,
                     event_count=1,
                     threat_score=verdict.threat_score,
                     attacker_profile=verdict.profile.value,
@@ -199,6 +202,12 @@ class PostgresEventRepository:
                             "started_at": func.least(
                                 SessionRow.started_at, session.excluded.started_at
                             ),
+                            # ended_at = dernière activité, tant que la session est ouverte.
+                            "ended_at": func.greatest(
+                                SessionRow.ended_at, session.excluded.ended_at
+                            ),
+                            # Un événement tardif rouvre une session fermée de justesse.
+                            "closed": False,
                             "event_count": SessionRow.event_count + 1,
                             "threat_score": func.greatest(
                                 SessionRow.threat_score, session.excluded.threat_score
@@ -266,6 +275,61 @@ class PostgresEventRepository:
                     raw_body=raw_body[:MAX_REJECTED_BODY_BYTES],
                 )
             )
+
+    # -- cycle de vie des sessions -----------------------------------------------
+
+    @staticmethod
+    def _last_activity() -> ColumnElement[datetime]:
+        """Dernière activité d'une session.
+
+        ``ended_at`` n'est tenu à jour que depuis #58 : pour une session plus ancienne,
+        on la retrouve dans ``event`` (index ``event_session_id_idx``).
+        """
+        last_event = (
+            select(func.max(Event.occurred_at))
+            .where(Event.session_id == SessionRow.id)
+            .scalar_subquery()
+        )
+        return func.coalesce(SessionRow.ended_at, last_event, SessionRow.started_at)
+
+    async def close_idle_sessions(self, before: datetime) -> int:
+        last_activity = self._last_activity()
+        async with self._sessions.begin() as db:
+            result = await db.execute(
+                update(SessionRow)
+                .where(SessionRow.closed.is_(False), last_activity < before)
+                .values(closed=True, ended_at=last_activity)
+                .execution_options(synchronize_session=False)
+            )
+        closed: int = result.rowcount  # type: ignore[attr-defined]
+        return closed
+
+    async def open_sessions(self) -> list[ResumedSession]:
+        stmt = (
+            select(
+                SessionRow.id,
+                SessionRow.source_ip,
+                DecoyService.name,
+                SessionRow.started_at,
+                self._last_activity(),
+                SessionRow.event_count,
+            )
+            .join(DecoyService, DecoyService.id == SessionRow.service_id)
+            .where(SessionRow.closed.is_(False))
+        )
+        async with self._sessions() as db:
+            rows = (await db.execute(stmt)).all()
+        return [
+            ResumedSession(
+                session_id=session_id,
+                source_ip=str(source_ip),
+                service=ServiceName(service),
+                started_at=started_at,
+                last_seen_at=last_seen_at,
+                event_count=event_count,
+            )
+            for session_id, source_ip, service, started_at, last_seen_at, event_count in rows
+        ]
 
     # -- compteurs de fenêtre glissante -----------------------------------------
 

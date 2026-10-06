@@ -8,10 +8,11 @@ référence pour les tests unitaires et pour développer sans PostgreSQL
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from shield.collector.defender import Rule
+from shield.collector.ingest.session_tracker import ResumedSession
 from shield.collector.repositories.base import MAX_REJECTED_BODY_BYTES, service_percentages
 from shield.common.schema import NormalizedEvent, RawEvent, ServiceName, Verdict
 
@@ -45,6 +46,12 @@ class InMemoryEventRepository:
         self.rejected.append((reason, raw_body[:MAX_REJECTED_BODY_BYTES]))
 
     # -- compteurs de fenêtre glissante -----------------------------------------
+
+    async def close_idle_sessions(self, before: datetime) -> int:
+        return 0
+
+    async def open_sessions(self) -> list[ResumedSession]:
+        return []
 
     async def counters(self, event: RawEvent) -> dict[str, int]:
         now = event.occurred_at

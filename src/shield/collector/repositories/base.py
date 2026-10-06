@@ -12,10 +12,12 @@ mémoire : c'est le prix d'un seul contrat pour les deux.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from shield.collector.defender import Rule
+from shield.collector.ingest.session_tracker import ResumedSession
 from shield.common.schema import NormalizedEvent, RawEvent, ServiceName, Verdict
 
 #: Taille maximale du corps conservé pour un événement rejeté (même plafond que US-06).
@@ -41,6 +43,14 @@ class EventRepository(Protocol):
 
     async def record_rejected(self, reason: str, raw_body: bytes) -> None:
         """Trace un événement malformé : rejeté, mais jamais perdu (§ 4.1)."""
+
+    # -- cycle de vie des sessions -----------------------------------------------
+
+    async def close_idle_sessions(self, before: datetime) -> int:
+        """Ferme les sessions sans activité depuis ``before``. Retourne leur nombre."""
+
+    async def open_sessions(self) -> list[ResumedSession]:
+        """Les sessions encore ouvertes, que le collecteur reprend à son démarrage (#58)."""
 
     # -- compteurs de fenêtre glissante (Redis au sprint 2, S2-07) ---------------
 
