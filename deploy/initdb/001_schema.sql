@@ -157,7 +157,8 @@ CREATE INDEX event_service_id_idx       ON event (service_id, occurred_at DESC);
 -- L'index coûterait plus en écriture qu'il ne rapporterait en lecture.
 
 -- Partitions : le mois courant et le suivant. La création des mois à venir est
--- assurée par la fonction ci-dessous, appelée par la tâche de maintenance.
+-- assurée par la fonction ci-dessous, appelée par le collecteur au démarrage
+-- puis chaque jour (PostgresEventRepository.maintain).
 CREATE TABLE event_default PARTITION OF event DEFAULT;
 
 CREATE OR REPLACE FUNCTION create_event_partition(target DATE)

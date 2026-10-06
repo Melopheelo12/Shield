@@ -1,5 +1,7 @@
 """L'API du collecteur, sur l'entrepôt en mémoire : routes, authentification, rejets."""
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -121,3 +123,19 @@ def test_le_stockage_se_choisit_par_variable_d_environnement(monkeypatch):
     monkeypatch.setenv("SHIELD_STORAGE", "sqlite")
     with pytest.raises(ValueError, match="SHIELD_STORAGE"):
         build_repository()
+
+
+async def test_la_maintenance_survit_a_un_echec(repository, monkeypatch):
+    calls = []
+
+    async def maintain():
+        calls.append(None)
+        if len(calls) == 1:
+            raise RuntimeError("base indisponible")
+
+    monkeypatch.setattr(repository, "maintain", maintain)
+    task = asyncio.create_task(api.run_maintenance(repository, interval=0))
+    while len(calls) < 3:
+        await asyncio.sleep(0)
+    task.cancel()
+    assert len(calls) >= 3

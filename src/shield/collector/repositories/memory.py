@@ -29,6 +29,9 @@ class InMemoryEventRepository:
     async def prepare(self, rules: list[Rule]) -> None:
         return None
 
+    async def maintain(self) -> None:
+        return None
+
     async def close(self) -> None:
         return None
 

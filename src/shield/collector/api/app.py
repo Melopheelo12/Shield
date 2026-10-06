@@ -8,6 +8,7 @@ de l'application et rangé dans ``app.state.repository``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -40,6 +41,7 @@ RULES_PATH = Path(os.getenv("RULES_PATH", "rules/detection_rules.yaml"))
 INGEST_TOKEN = os.getenv("INGEST_TOKEN", "change-me-ingest-token")
 INGEST_PATH = "/api/v1/ingest"
 MAX_REJECTION_REASON_CHARS = 1000
+MAINTENANCE_INTERVAL_SECONDS = 86_400
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +52,33 @@ mapper = MitreMapper()
 agent = DefenderAgent(engine=RuleEngine.from_file(RULES_PATH))
 
 
+async def run_maintenance(
+    repository: EventRepository, interval: float = MAINTENANCE_INTERVAL_SECONDS
+) -> None:
+    """Appelle ``repository.maintain()`` à intervalle fixe, jusqu'à l'arrêt.
+
+    Un échec est journalisé puis retenté au tour suivant : la maintenance ne doit
+    jamais faire tomber l'ingestion.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await repository.maintain()
+        except Exception:
+            logger.exception("maintenance du stockage en échec")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Ouvre le stockage et y synchronise les règles avant d'accepter la moindre requête."""
     repository = build_repository()
     await repository.prepare(agent.engine.rules)
     app.state.repository = repository
+    maintenance = asyncio.create_task(run_maintenance(repository))
     try:
         yield
     finally:
+        maintenance.cancel()
         await repository.close()
 
 

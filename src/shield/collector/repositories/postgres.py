@@ -17,11 +17,11 @@ Les compteurs de fenêtre glissante sont calculés ici en SQL (index
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from ipaddress import ip_address
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, func, insert, or_, select
+from sqlalchemy import and_, case, distinct, func, insert, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import InstrumentedAttribute
@@ -51,6 +51,9 @@ from shield.common.schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Partitions mensuelles d'``event`` créées d'avance, en plus de celle du mois courant.
+PARTITION_MONTHS_AHEAD = 2
 
 _RULE_COLUMNS = (
     "name",
@@ -128,6 +131,26 @@ class PostgresEventRepository:
 
         self._service_ids = service_ids
         self._rule_ids = rule_ids
+        await self.maintain()
+
+    async def maintain(self, today: date | None = None) -> None:
+        """Crée les partitions du mois courant et des ``PARTITION_MONTHS_AHEAD`` suivants.
+
+        Un événement sans partition tombe dans ``event_default`` ; PostgreSQL refuse
+        alors de créer la partition de son mois, et la purge RGPD par ``DROP`` de
+        partition devient impossible (#62). La partition doit donc exister **avant**
+        le premier événement du mois : appelée au démarrage puis chaque jour, cette
+        méthode garde deux mois d'avance. ``create_event_partition`` est idempotente.
+        """
+        first = (today or datetime.now(UTC).date()).replace(day=1)
+        async with self._sessions.begin() as db:
+            for offset in range(PARTITION_MONTHS_AHEAD + 1):
+                years, month = divmod(first.month - 1 + offset, 12)
+                target = first.replace(year=first.year + years, month=month + 1)
+                result = await db.execute(
+                    text("SELECT create_event_partition(:target)"), {"target": target}
+                )
+                logger.debug("partition %s", result.scalar_one())
 
     async def close(self) -> None:
         if self._owns_default_engine:
