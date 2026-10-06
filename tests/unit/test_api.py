@@ -146,7 +146,7 @@ async def test_la_maintenance_survit_a_un_echec(repository, monkeypatch):
             raise RuntimeError("base indisponible")
 
     monkeypatch.setattr(repository, "maintain", maintain)
-    task = asyncio.create_task(api.run_maintenance(repository, interval=0))
+    task = asyncio.create_task(api.run_periodically(repository.maintain, interval=0))
     while len(calls) < 3:
         await asyncio.sleep(0)
     task.cancel()
