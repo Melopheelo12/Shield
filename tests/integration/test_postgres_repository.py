@@ -1,7 +1,7 @@
 """Le collecteur branché sur PostgreSQL (S1-06) : écriture, relecture, agrégats, chaîne complète."""
 
 import dataclasses
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -95,6 +95,24 @@ async def test_l_evenement_atterrit_dans_sa_partition_mensuelle(repository, pg_e
         uid=event.event_id,
     )
     assert partition == event.occurred_at.strftime("event_%Y_%m")
+
+
+async def test_les_partitions_des_mois_a_venir_sont_creees_d_avance(repository, pg_engine):
+    """#62 : le 1er décembre, l'événement va dans sa partition, pas dans event_default."""
+    await repository.maintain(today=date(2026, 11, 15))
+    await repository.maintain(today=date(2026, 11, 16))  # idempotente
+
+    for month in ("event_2026_11", "event_2026_12", "event_2027_01"):
+        [exists] = await fetch_one(pg_engine, "SELECT to_regclass(:name) IS NOT NULL", name=month)
+        assert exists, month
+
+    event, _ = await capture(repository, occurred_at=datetime(2026, 12, 1, tzinfo=UTC))
+    [partition] = await fetch_one(
+        pg_engine,
+        "SELECT tableoid::regclass::text FROM event WHERE event_uid = :uid",
+        uid=event.event_id,
+    )
+    assert partition == "event_2026_12"
 
 
 async def test_session_et_adresse_sont_agregees(repository, pg_engine):

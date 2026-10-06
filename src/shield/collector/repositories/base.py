@@ -28,6 +28,9 @@ class EventRepository(Protocol):
     async def prepare(self, rules: list[Rule]) -> None:
         """Au démarrage : synchronise le référentiel des règles et les tables de référence."""
 
+    async def maintain(self) -> None:
+        """Chaque jour : prépare le stockage des semaines à venir."""
+
     async def close(self) -> None:
         """À l'arrêt : libère les connexions."""
 
