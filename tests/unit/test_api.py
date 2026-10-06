@@ -68,6 +68,18 @@ async def test_sans_jeton_rien_n_est_ecrit_meme_en_rejet(client, repository):
     assert not repository.rejected
 
 
+@pytest.mark.parametrize("token", [None, "mauvais-jeton"])
+async def test_sans_jeton_un_json_illisible_n_est_pas_trace(client, repository, token):
+    """#63 : FastAPI décode le corps avant de vérifier le jeton."""
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["X-Ingest-Token"] = token
+    response = await client.post("/api/v1/ingest", content=b'{"service":', headers=headers)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "invalid ingest token"}
+    assert not repository.rejected
+
+
 async def test_un_evenement_malforme_est_rejete_mais_trace(client, repository):
     response = await client.post(
         "/api/v1/ingest", json=ssh_attempt(service="telnet"), headers=HEADERS

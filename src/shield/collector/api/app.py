@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -98,20 +99,39 @@ app = FastAPI(
 )
 
 
+UNAUTHORIZED_DETAIL = "invalid ingest token"
+
+
+def is_valid_ingest_token(token: str | None) -> bool:
+    """Comparaison à temps constant : la durée de réponse ne trahit pas le jeton."""
+    return token is not None and secrets.compare_digest(
+        token.encode("utf-8"), INGEST_TOKEN.encode("utf-8")
+    )
+
+
 def require_ingest_token(x_ingest_token: Annotated[str | None, Header()] = None) -> None:
     """Les leurres ne sont pas des utilisateurs : ils ont leur propre secret partagé."""
-    if x_ingest_token != INGEST_TOKEN:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid ingest token")
+    if not is_valid_ingest_token(x_ingest_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=UNAUTHORIZED_DETAIL)
 
 
 @app.exception_handler(RequestValidationError)
 async def trace_rejected_event(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Un événement malformé est rejeté (422) mais tracé dans ``event_rejected`` (§ 4.1).
 
-    Le jeton est vérifié avant le corps : seul un leurre authentifié peut écrire ici.
+    Seul un leurre authentifié peut écrire ici. FastAPI décode le corps **avant** de
+    résoudre les dépendances : pour un JSON illisible, ``require_ingest_token`` n'a
+    pas encore tourné quand on arrive ici. Le jeton est donc revérifié, et une requête
+    sans le bon jeton reçoit le même 401 qu'avec un corps valide, sans rien écrire (#63).
+
     Un échec de traçage est journalisé, jamais propagé — la réponse au leurre ne change pas.
     """
     if request.url.path == INGEST_PATH:
+        if not is_valid_ingest_token(request.headers.get("x-ingest-token")):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": UNAUTHORIZED_DETAIL},
+            )
         reason = "; ".join(
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
             for error in exc.errors()
