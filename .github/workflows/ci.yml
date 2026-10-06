@@ -91,6 +91,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://shield:shield@localhost:5432/shield_test
           REDIS_URL: redis://localhost:6379/0
           INGEST_TOKEN: ci-token
+          SHIELD_REQUIRE_DB: "1"   # echouer, et non ignorer, si la base manque
         run: pytest tests/integration -q
 
   # ------------------------------------------------------------- 5. Securite
@@ -115,11 +116,30 @@ jobs:
   load:
     name: Charge — 3000 evenements en 60 s
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: shield
+          POSTGRES_PASSWORD: shield
+          POSTGRES_DB: shield
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
+    env:
+      DATABASE_URL: postgresql+asyncpg://shield:shield@localhost:5432/shield
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
       - run: pip install -e ".[dev]"
+      - name: Appliquer le schema (comme docker-entrypoint-initdb.d)
+        env: { PGPASSWORD: shield }
+        run: |
+          for script in deploy/initdb/*.sql; do
+            psql -h localhost -U shield -d shield -v ON_ERROR_STOP=1 -f "$script"
+          done
       - name: Demarrer le collecteur
         env: { INGEST_TOKEN: ci-token }
         run: |
