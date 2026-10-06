@@ -129,6 +129,9 @@ class Event(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    # L'identifiant du contrat (RawEvent.event_id), celui que voient l'API et le
+    # tableau de bord. ``id`` reste interne. Voir 002_event_identity.sql.
+    event_uid: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     service_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("decoy_service.id"))
 
@@ -149,6 +152,7 @@ class Event(Base):
         String(16), ForeignKey("attack_technique.id"), nullable=True
     )
     threat_score: Mapped[int] = mapped_column(SmallInteger, default=0)
+    attacker_profile: Mapped[str] = mapped_column(String(32), default="indetermine")
     enrichment_status: Mapped[str] = mapped_column(String(16), default="pending")
     from_sandbox: Mapped[bool] = mapped_column(Boolean, default=False)
 
