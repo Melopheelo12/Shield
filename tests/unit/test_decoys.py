@@ -1,9 +1,11 @@
 """Les leurres doivent analyser sans jamais interpréter, et ne jamais se trahir."""
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
+from shield.common.schema import MAX_PAYLOAD_BYTES
 from shield.decoys.http import HTTPDecoy
 from shield.decoys.ssh import SSHDecoy
 
@@ -77,3 +79,20 @@ def test_la_page_servie_ne_reinjecte_pas_la_saisie():
     ).decode()
     assert "<script>" not in page.replace("<script>alert", "")
     assert "value=" not in page
+
+
+class _Peer:
+    """Le strict nécessaire d'un ``StreamWriter`` pour ``build_raw_event``."""
+
+    def get_extra_info(self, name):
+        return ("203.0.113.5", 40000) if name == "peername" else None
+
+
+def test_le_leurre_calcule_l_empreinte_sur_tout_ce_qu_il_a_lu():
+    """US-06 : seul le leurre voit la charge entière, au-delà des 4 Ko transmis."""
+    payload = bytes(range(256)) * 64  # 16 Kio
+    event = SSHDecoy(port=22, ingest_url="http://x", ingest_token="t").build_raw_event(
+        writer=_Peer(), payload=payload
+    )
+    assert len(event.payload) == MAX_PAYLOAD_BYTES
+    assert event.payload_sha256 == hashlib.sha256(payload).hexdigest()

@@ -14,6 +14,7 @@ mitigation principale du risque R1 (« le honeypot sert de rebond vers un tiers 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
@@ -202,6 +203,8 @@ class DecoyService(ABC):
             password=password,
             payload=payload[: MAX_PAYLOAD_BYTES * 2],
             payload_truncated=len(payload) > MAX_PAYLOAD_BYTES,
+            # Seul le leurre voit la charge entière : l'empreinte se calcule ici (US-06).
+            payload_sha256=hashlib.sha256(payload).hexdigest() if payload else None,
         )
         return event.truncated()
 
