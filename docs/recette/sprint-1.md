@@ -61,3 +61,20 @@ make run-decoy                     # et les leurres http (8080) / ftp (2121)
 make qa                            # charge + entrées malveillantes + fuites d'identité
 docker compose up -d && make qa-egress
 ```
+
+## Suivi au 8 octobre 2026
+
+Revérifié sur `main` après les correctifs de Ryan, pile complète avec le relais
+d'entrée (ADR 008).
+
+| Issue | État | Vérification |
+| --- | --- | --- |
+| #52 | levé par #67 | Ports publiés par `edge`, adresse réelle transmise par PROXY protocol, leurres toujours isolés (`make qa-egress` : 0 écart). Régression de demi-fermeture trouvée et corrigée par #70. À fermer après vérification sur le VPS. |
+| #58 | corrigé par #66 | — |
+| #62 | corrigé par #64 | — |
+| #63 | corrigé par #65 | JSON illisible sans jeton → 401 |
+| #53 | correctif en revue (#68) | Toujours reproduit sur `main` |
+| #54 | ouvert | 500 avec jeton en local (Python 3.14) ; non reproduit dans l'image Docker (Python 3.12) |
+| #55 | ouvert | Contourné par `make qa-load` |
+
+Via le relais : 19 tentatives → 19 événements, 43 sondes → 0 fuite d'identité.
