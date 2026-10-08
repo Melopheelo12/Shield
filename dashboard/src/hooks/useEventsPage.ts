@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchEventsPage } from "../api/attacks";
 import type { NormalizedEvent } from "../types/events";
 import { EVENTS_PAGE_SIZE } from "../utils/constants";
@@ -31,7 +31,10 @@ export function useEventsPage(
   });
   // Pile liée aux filtres : un changement de filtre repart de la première page
   // sans jamais rejouer un curseur obtenu avec d'anciens filtres.
-  const cursors = stack.key === filtersKey ? stack.cursors : [null];
+  const cursors = useMemo<(string | null)[]>(
+    () => (stack.key === filtersKey ? stack.cursors : [null]),
+    [stack, filtersKey],
+  );
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<LoadState<NormalizedEvent[]>>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
