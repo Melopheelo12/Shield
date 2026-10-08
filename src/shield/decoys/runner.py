@@ -29,6 +29,7 @@ async def main_async(args: argparse.Namespace) -> None:
         ingest_url=os.getenv("COLLECTOR_INGEST_URL", "http://localhost:8000/api/v1/ingest"),
         ingest_token=os.getenv("INGEST_TOKEN", "change-me-ingest-token"),
         banner=args.banner,
+        proxy_protocol=args.proxy_protocol,
     )
     try:
         await decoy.serve_forever()
@@ -43,6 +44,12 @@ def main() -> int:
     parser.add_argument("service", choices=sorted(DECOYS))
     parser.add_argument("--port", type=int)
     parser.add_argument("--banner")
+    parser.add_argument(
+        "--proxy-protocol",
+        action="store_true",
+        default=os.getenv("DECOY_PROXY_PROTOCOL", "").lower() in {"1", "true", "yes"},
+        help="attend un en-tête PROXY v1 du relais d'entrée (ADR 008)",
+    )
     args = parser.parse_args()
     args.port = args.port or int(
         os.getenv(f"DECOY_{args.service.upper()}_PORT", DEFAULT_PORTS[args.service])
