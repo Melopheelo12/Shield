@@ -69,6 +69,7 @@ async def test_un_evenement_ecrit_se_relit_a_l_identique(repository):
     assert (stored.username, stored.password) == ("root", "123456")
     assert stored.payload == event.payload
     assert stored.payload_truncated
+    assert stored.payload_sha256 == event.payload_sha256 is not None
     assert stored.session_id == event.session_id
     assert stored.technique_id == event.technique_id
     assert stored.threat_score == event.threat_score
