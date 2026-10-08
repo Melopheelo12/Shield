@@ -82,6 +82,7 @@ docker compose exec collector python -c \
 
 **J4 est atteint** quand `events` > 0 avec une IP source qui n'est pas la nôtre.
 
-> ⚠️ **Bloquant constaté en recette** : tant que les leurres ne sont reliés qu'à des
-> réseaux `internal`, Docker ne publie pas leurs ports. Aucun événement d'Internet
-> ne peut arriver. Voir l'issue correspondante avant le `docker compose up`.
+> Les ports 22, 80 et 21 sont publiés par le relais `edge` (ADR 008, #67), qui
+> transmet l'adresse réelle de l'attaquant aux leurres par PROXY protocol. Sur le
+> VPS, vérifier que `source_ip` en base est bien celle du client et non celle du
+> relais : c'est ce qui permettra de fermer #52.
