@@ -1,9 +1,13 @@
 """Les leurres doivent analyser sans jamais interpréter, et ne jamais se trahir."""
 
+import asyncio
+import json
 from pathlib import Path
 
+import httpx
 import pytest
 
+from shield.decoys.ftp import FTPDecoy
 from shield.decoys.http import HTTPDecoy
 from shield.decoys.ssh import SSHDecoy
 
@@ -77,3 +81,52 @@ def test_la_page_servie_ne_reinjecte_pas_la_saisie():
     ).decode()
     assert "<script>" not in page.replace("<script>alert", "")
     assert "value=" not in page
+
+
+async def ftp_session(*packets: bytes) -> tuple[dict, bytes]:
+    """Joue des paquets contre un vrai leurre FTP ; retourne l'événement émis et les réponses."""
+    emitted: list[dict] = []
+    received = asyncio.Event()
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        emitted.append(json.loads(request.content))
+        received.set()
+        return httpx.Response(202)
+
+    decoy = FTPDecoy(
+        port=0,
+        ingest_url="http://collector/api/v1/ingest",
+        ingest_token="t",
+        banner="220 (vsFTPd 3.0.5)",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(capture)),
+    )
+    await decoy.start()
+    try:
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", decoy._server.sockets[0].getsockname()[1]
+        )
+        await reader.readline()  # bannière
+        for packet in packets:
+            writer.write(packet)
+            await writer.drain()
+            await asyncio.sleep(0.05)
+        await asyncio.wait_for(received.wait(), timeout=5)
+        replies = await asyncio.wait_for(reader.read(), timeout=5)
+        writer.close()
+    finally:
+        await decoy.stop()
+    [event] = emitted
+    return event, replies
+
+
+async def test_ftp_user_et_pass_dans_un_meme_paquet():
+    """#53 : un robot qui enchaîne USER et PASS ne doit pas perdre le mot de passe."""
+    event, replies = await ftp_session(b"USER bob\r\nPASS secret\r\n")
+    assert (event["username"], event["password"]) == ("bob", "secret")
+    assert replies == b"331 Please specify the password.\r\n530 Login incorrect.\r\n"
+
+
+async def test_ftp_user_et_pass_dans_deux_paquets():
+    event, replies = await ftp_session(b"USER bob\r\n", b"PASS secret\r\n")
+    assert (event["username"], event["password"]) == ("bob", "secret")
+    assert replies.endswith(b"530 Login incorrect.\r\n")
