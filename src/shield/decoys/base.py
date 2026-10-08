@@ -17,7 +17,8 @@ import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from ipaddress import ip_address
+from contextvars import ContextVar
+from ipaddress import IPv4Address, ip_address
 
 import httpx
 
@@ -34,6 +35,40 @@ IDLE_TIMEOUT_SECONDS = 10.0
 #: Pair de repli quand l'adresse du client est indisponible. Ce n'est pas une écoute.
 _UNKNOWN_PEER = ("0.0.0.0", 0)  # noqa: S104  # nosec B104
 
+#: Taille maximale d'un en-tête PROXY protocol v1, fin de ligne comprise (spécification).
+PROXY_HEADER_MAX_BYTES = 107
+
+#: Adresse réelle du client de la connexion en cours, transmise par le relais d'entrée.
+#: Une variable de contexte suit chaque connexion (une tâche asyncio chacune) sans
+#: changer la signature des ``handle_connection`` des leurres.
+_proxied_peer: ContextVar[tuple[str, int] | None] = ContextVar("proxied_peer", default=None)
+
+
+def parse_proxy_header(line: bytes) -> tuple[str, int] | None:
+    """Lit un en-tête PROXY protocol v1 et retourne l'adresse et le port source.
+
+    Les leurres ne sont joignables que par le relais d'entrée (ADR 008), qui préfixe
+    chaque connexion de cette ligne : c'est le seul moyen de connaître l'adresse réelle
+    de l'attaquant sans exposer le leurre. Retourne ``None`` pour ``PROXY UNKNOWN``.
+    Lève ``ValueError`` sur tout écart à la spécification : l'en-tête n'est pas
+    interprété au-delà de ces cinq champs, et rien n'est deviné.
+    """
+    if len(line) > PROXY_HEADER_MAX_BYTES or not line.endswith(b"\r\n"):
+        raise ValueError("en-tête PROXY trop long ou non terminé")
+    fields = line[:-2].split(b" ")
+    if fields[0] != b"PROXY" or len(fields) < 2:
+        raise ValueError("en-tête PROXY absent")
+    if fields[1] == b"UNKNOWN":
+        return None
+    if len(fields) != 6 or fields[1] not in (b"TCP4", b"TCP6"):
+        raise ValueError("en-tête PROXY mal formé")
+    source = ip_address(fields[2].decode("ascii"))
+    if isinstance(source, IPv4Address) != (fields[1] == b"TCP4"):
+        raise ValueError("famille d'adresse incohérente")
+    if not fields[4].isdigit() or not 0 <= int(fields[4]) <= 65_535:
+        raise ValueError("port source invalide")
+    return str(source), int(fields[4])
+
 
 class DecoyService(ABC):
     """Écouter, dialoguer le strict minimum, journaliser, refuser."""
@@ -48,9 +83,11 @@ class DecoyService(ABC):
         *,
         banner: str = "",
         max_connections: int = 200,
+        proxy_protocol: bool = False,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.port = port
+        self.proxy_protocol = proxy_protocol
         self.banner = banner
         self.ingest_url = ingest_url
         self.ingest_token = ingest_token
@@ -65,7 +102,8 @@ class DecoyService(ABC):
         # Un leurre DOIT écouter sur toutes les interfaces : c'est sa raison d'être.
         # Le risque habituel de B104 (exposer un service interne) ne s'applique pas ici :
         # le conteneur tourne en non-root, en lecture seule, et decoy_net est déclaré
-        # `internal` — aucune route sortante n'existe depuis cette zone.
+        # `internal` — aucune route sortante n'existe depuis cette zone. Internet n'y
+        # entre que par le relais d'entrée (ADR 008).
         self._server = await asyncio.start_server(
             self._guarded_connection,
             host="0.0.0.0",  # noqa: S104  # nosec B104
@@ -96,6 +134,8 @@ class DecoyService(ABC):
         """Un échec sur une connexion ne doit jamais arrêter le service (US-01)."""
         async with self._semaphore:
             try:
+                if self.proxy_protocol and not await self._accept_proxy_header(reader):
+                    return
                 await asyncio.wait_for(
                     self.handle_connection(reader, writer), timeout=IDLE_TIMEOUT_SECONDS * 3
                 )
@@ -110,6 +150,22 @@ class DecoyService(ABC):
                     await writer.wait_closed()
                 except with_suppress:
                     pass
+
+    async def _accept_proxy_header(self, reader: asyncio.StreamReader) -> bool:
+        """Lit l'en-tête du relais avant tout dialogue. Faux : la connexion est fermée.
+
+        Une connexion sans en-tête valide ne vient pas du relais : on la ferme sans
+        émettre d'événement, plutôt que de l'attribuer à une mauvaise adresse.
+        """
+        try:
+            line = await asyncio.wait_for(reader.readuntil(b"\r\n"), timeout=IDLE_TIMEOUT_SECONDS)
+            peer = parse_proxy_header(line)
+        except (ValueError, asyncio.LimitOverrunError):
+            logger.warning("decoy %s: en-tête PROXY invalide, connexion fermée", self.service.value)
+            return False
+        if peer is not None:
+            _proxied_peer.set(peer)
+        return True
 
     @abstractmethod
     async def handle_connection(
@@ -136,7 +192,7 @@ class DecoyService(ABC):
         payload: bytes = b"",
     ) -> RawEvent:
         """Construit un événement conforme au contrat, charge utile déjà plafonnée."""
-        peer = writer.get_extra_info("peername") or _UNKNOWN_PEER
+        peer = _proxied_peer.get() or writer.get_extra_info("peername") or _UNKNOWN_PEER
         source_ip, source_port = peer[0], peer[1]
         event = RawEvent(
             service=self.service,
