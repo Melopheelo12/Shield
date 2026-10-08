@@ -20,6 +20,7 @@ export interface RawEvent {
   password: string;
   payload: string; // base64
   payload_truncated: boolean;
+  payload_sha256: string | null; // empreinte de la charge complète, avant troncature
 }
 
 export interface NormalizedEvent extends RawEvent {

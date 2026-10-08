@@ -1,12 +1,20 @@
 """Le contrat d'événement doit survivre à tout ce qu'un attaquant peut envoyer."""
 
+import hashlib
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 
 import pytest
 from pydantic import ValidationError
 
-from shield.common.schema import MAX_PAYLOAD_BYTES, RawEvent, ServiceName, Verdict
+from shield.common.schema import (
+    MAX_PAYLOAD_BYTES,
+    NormalizedEvent,
+    RawEvent,
+    ServiceName,
+    Verdict,
+)
+from shield.tools.gen_ts_types import render
 
 
 def make(**overrides):
@@ -105,3 +113,39 @@ def test_horodatage_par_defaut_est_en_utc():
     event = make()
     assert event.occurred_at.tzinfo is not None
     assert event.occurred_at <= datetime.now(UTC)
+
+
+def test_l_empreinte_porte_sur_la_charge_complete_pas_sur_l_extrait():
+    """US-06 : deux exploits identiques gardent la même empreinte, même tronqués."""
+    full = b"A" * (MAX_PAYLOAD_BYTES * 3)
+    event = make(payload=full).truncated()
+    assert event.payload_truncated
+    assert event.payload_sha256 == hashlib.sha256(full).hexdigest()
+
+
+def test_l_empreinte_fournie_par_le_leurre_est_conservee():
+    digest = hashlib.sha256(b"charge vue par le leurre").hexdigest()
+    event = make(payload=b"extrait", payload_truncated=True, payload_sha256=digest).truncated()
+    assert event.payload_sha256 == digest
+
+
+def test_un_extrait_deja_tronque_ne_recoit_pas_d_empreinte_trompeuse():
+    assert make(payload=b"extrait", payload_truncated=True).truncated().payload_sha256 is None
+
+
+def test_sans_charge_pas_d_empreinte():
+    assert make().truncated().payload_sha256 is None
+
+
+@pytest.mark.parametrize("digest", ["abc", "G" * 64, "A" * 64])
+def test_une_empreinte_mal_formee_est_refusee(digest):
+    with pytest.raises(ValidationError):
+        make(payload=b"x", payload_sha256=digest)
+
+
+@pytest.mark.parametrize("model", [RawEvent, NormalizedEvent])
+def test_chaque_champ_du_contrat_existe_cote_typescript(model):
+    """Le gabarit TypeScript est écrit à la main : un champ ajouté ici doit l'être là."""
+    rendered = render()
+    for field in model.model_fields:
+        assert f"  {field}:" in rendered, f"{model.__name__}.{field} absent de events.ts"
