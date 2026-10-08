@@ -4,15 +4,27 @@ Ces tests exigent PostgreSQL et Redis réels. Ils tournent en CI via les *servic
 GitHub Actions (voir `.github/workflows/ci.yml`, job `integration`), et localement via
 `docker compose up -d postgres redis`.
 
-Ils sont écrits au **sprint 1**, en même temps que le branchement du collecteur sur
-PostgreSQL (tâches S1-05 et S1-06 du plan de sprints).
+## Lancer en local
+
+```bash
+make test-integration          # utilise DATABASE_URL, défaut : shield:shield@localhost:5432/shield
+```
+
+Chaque test crée un **schéma jetable** (`shield_it_…`), y applique les scripts de
+`deploy/initdb/` puis le supprime : la base visée n'est jamais modifiée ailleurs, on
+peut donc viser sa base de développement. Sans PostgreSQL joignable, les tests sont
+ignorés ; avec `SHIELD_REQUIRE_DB=1` (positionné en CI), ils échouent.
 
 ## Ce qu'ils doivent couvrir
 
-| Test | Exigence vérifiée |
-| :--- | :--- |
-| Ingestion → base → enrichissement → verdict | Chaîne complète sur une vraie base |
-| Partition mensuelle créée automatiquement | Purge RGPD par `DROP PARTITION` |
+| Test | Exigence vérifiée | État |
+| :--- | :--- | :---: |
+| Ingestion → base → verdict, par l'API | Chaîne complète sur une vraie base (S1-06) | ✅ |
+| Écriture / relecture d'un événement, verdict identique | US-01, US-13 | ✅ |
+| Rejet tracé dans `event_rejected` | § 4.1 | ✅ |
+| Événement rangé dans sa partition mensuelle | Partitionnement (ADR 004) | ✅ |
+| Ingestion → base → enrichissement → verdict | Chaîne complète avec enrichissement | |
+| Partition mensuelle créée automatiquement | Purge RGPD par `DROP PARTITION` | |
 | Purge de conservation | US-46 |
 | Reprise d'enrichissement `pending` | US-10, dégradation gracieuse |
 | Compteurs Redis de fenêtre glissante | US-18 |

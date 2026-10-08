@@ -49,6 +49,7 @@ qu'il faut savoir exploiter, les autres coûtent un abonnement annuel.
 ```mermaid
 flowchart TB
     NET["Internet — scanners · bots · attaquants"]
+    EDG["Relais d'entrée<br/>nginx stream · PROXY protocol"]
     S1["Leurre SSH · 22"]
     S2["Leurre HTTP admin · 80"]
     S3["Leurre FTP · 21"]
@@ -62,7 +63,7 @@ flowchart TB
     UI["Tableau de bord<br/>React 18 + TypeScript"]
     EXT["APIs externes<br/>AbuseIPDB · NVD · CISA KEV"]
 
-    NET ==> S1 & S2 & S3
+    NET ==> EDG ==> S1 & S2 & S3
     S1 & S2 & S3 ==>|"événements JSON — flux unidirectionnel"| COL
     COL ==> ENR ==> DEF ==> ALR
     COL --> PG
@@ -89,8 +90,14 @@ Cette contrainte est appliquée par Docker lui-même : `decoy_net` et `ingest_ne
 déclarés `internal`. Ce n'est pas une règle de pare-feu que l'on peut oublier de
 charger, c'est une propriété du réseau.
 
+Docker ne publiant pas les ports d'un conteneur relié seulement à des réseaux internes,
+Internet atteint les leurres par un **relais d'entrée** (`edge`) qui ne fait que
+transmettre les octets, et leur passe l'adresse réelle de l'attaquant par le PROXY
+protocol ([ADR 008](docs/adr/008-relais-d-entree-des-leurres.md)).
+
 | Zone | Contenu | Sortie Internet |
 | :--- | :--- | :---: |
+| **Entrée** | Relais `edge` (nginx stream), seul conteneur publié sur les ports des leurres | Réseau ouvert, ne relaie que vers les leurres |
 | **Leurre** | Les trois services exposés | **Aucune** |
 | **Traitement** | Collecteur, enrichisseur, agent défenseur, alertes, veille | Liste blanche |
 | **Données** | PostgreSQL, Redis | Aucune |
