@@ -1,10 +1,14 @@
 # =============================================================================
 # SHIELD — production / demonstration
 #
-# Cinq reseaux, quatre zones de confiance. Le point essentiel :
+# Six reseaux, cinq zones de confiance. Le point essentiel :
 # la zone leurre n'a AUCUNE route sortante (decoy_net et ingest_net sont
 # declares "internal"). C'est une propriete du reseau Docker, pas une regle de
 # pare-feu que l'on peut oublier de charger.
+#
+# Docker ne publie pas les ports d'un conteneur relie seulement a des reseaux
+# internes : Internet atteint les leurres par le relais `edge` (ADR 008), qui
+# leur transmet l'adresse reelle de l'attaquant par le PROXY protocol.
 #
 #   docker compose up -d           demarre la pile
 #   docker compose stop decoy-ssh decoy-http decoy-ftp    arret d'urgence
@@ -28,10 +32,32 @@ x-decoy-hardening: &decoy-hardening
   environment:
     COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
     INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
+    DECOY_PROXY_PROTOCOL: "1"
   networks: [decoy_net, ingest_net]
   depends_on: [collector]
 
 services:
+  # ------------------------------------------------------------- ZONE ENTREE
+  edge:
+    image: nginx:1.27-alpine
+    container_name: shield-edge
+    restart: unless-stopped
+    # Les scripts d'entree de l'image reecrivent la configuration : inutile ici.
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=8m", "/var/cache/nginx:size=8m"]
+    volumes:
+      - ./deploy/edge.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${DECOY_SSH_PORT:-22}:2222"
+      - "${DECOY_HTTP_PORT:-80}:8080"
+      - "${DECOY_FTP_PORT:-21}:2121"
+    networks: [edge_net, decoy_net]
+    depends_on: [decoy-ssh, decoy-http, decoy-ftp]
+
   # ------------------------------------------------------------- ZONE LEURRE
   decoy-ssh:
     <<: *decoy-hardening
@@ -41,13 +67,12 @@ services:
       COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
       INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
       DECOY_SSH_BANNER: ${DECOY_SSH_BANNER:-SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4}
-    ports: ["${DECOY_SSH_PORT:-22}:2222"]
+      DECOY_PROXY_PROTOCOL: "1"
 
   decoy-http:
     <<: *decoy-hardening
     container_name: shield-decoy-http
     command: ["python", "-m", "shield.decoys.runner", "http", "--port", "8080"]
-    ports: ["${DECOY_HTTP_PORT:-80}:8080"]
 
   decoy-ftp:
     <<: *decoy-hardening
@@ -57,7 +82,7 @@ services:
       COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
       INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
       DECOY_FTP_BANNER: ${DECOY_FTP_BANNER:-220 (vsFTPd 3.0.5)}
-    ports: ["${DECOY_FTP_PORT:-21}:2121"]
+      DECOY_PROXY_PROTOCOL: "1"
 
   # --------------------------------------------------------- ZONE TRAITEMENT
   collector:
@@ -124,6 +149,7 @@ services:
     depends_on: [collector]
 
 networks:
+  edge_net: {}          # entree Internet du relais, seul voisin exterieur des leurres
   decoy_net:
     internal: true      # AUCUNE route vers Internet depuis la zone leurre
   ingest_net:
