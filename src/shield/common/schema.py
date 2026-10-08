@@ -11,6 +11,7 @@ Les huit champs obligatoires de ``RawEvent`` sont contractuels : ils corresponde
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from ipaddress import IPv4Address, IPv6Address
@@ -78,6 +79,10 @@ class RawEvent(BaseModel):
 
     payload: bytes = b""
     payload_truncated: bool = False
+    #: Empreinte de la charge utile **complète**, calculée avant la troncature à 4 Ko
+    #: (US-06). Deux exploits identiques gardent la même empreinte même quand on n'en
+    #: conserve que le début. ``None`` pour une charge vide.
+    payload_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("payload", mode="before")
     @classmethod
@@ -109,12 +114,18 @@ class RawEvent(BaseModel):
         return base64.b64encode(value).decode("ascii")
 
     def truncated(self) -> RawEvent:
-        """Renvoie une copie dont la charge utile respecte le plafond contractuel."""
-        if len(self.payload) <= MAX_PAYLOAD_BYTES:
-            return self
-        return self.model_copy(
-            update={"payload": self.payload[:MAX_PAYLOAD_BYTES], "payload_truncated": True}
-        )
+        """Renvoie une copie dont la charge utile respecte le plafond contractuel.
+
+        Si l'émetteur n'a pas fourni l'empreinte, elle est calculée ici, **avant** de
+        tronquer — sauf si la charge est déjà marquée tronquée : l'empreinte d'un
+        extrait se ferait passer pour celle de la charge complète.
+        """
+        update: dict[str, object] = {}
+        if self.payload and self.payload_sha256 is None and not self.payload_truncated:
+            update["payload_sha256"] = hashlib.sha256(self.payload).hexdigest()
+        if len(self.payload) > MAX_PAYLOAD_BYTES:
+            update.update(payload=self.payload[:MAX_PAYLOAD_BYTES], payload_truncated=True)
+        return self.model_copy(update=update) if update else self
 
 
 class NormalizedEvent(RawEvent):
