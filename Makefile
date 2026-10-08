@@ -1,4 +1,6 @@
-.PHONY: help install dev lint format test test-cov types check run-api run-decoy fake load clean \
+SHIELD_STORAGE ?= postgres
+
+.PHONY: help install dev lint format test test-integration test-cov types check run-api run-decoy fake load clean \
 	qa qa-load qa-inputs qa-identity qa-egress
 
 help:  ## Affiche cette aide
@@ -21,6 +23,9 @@ format:  ## Corrige automatiquement
 test:  ## Tests unitaires
 	./.venv/bin/pytest tests/unit
 
+test-integration:  ## Tests d'intégration (PostgreSQL de DATABASE_URL, schéma jetable)
+	./.venv/bin/pytest tests/integration
+
 test-cov:  ## Tests + couverture sur les zones critiques
 	./.venv/bin/pytest tests/unit \
 	  --cov=shield.common.schema --cov=shield.collector.defender \
@@ -33,8 +38,8 @@ types:  ## Régénère les types TypeScript depuis les modèles Pydantic
 check: lint test-cov  ## Tout ce que la CI vérifie, en local
 	./.venv/bin/python -m shield.tools.gen_ts_types --check
 
-run-api:  ## Lance le collecteur en local (port 8000)
-	INGEST_TOKEN=dev-token ./.venv/bin/uvicorn shield.collector.api.app:app --reload --port 8000
+run-api:  ## Lance le collecteur en local (port 8000) ; SHIELD_STORAGE=memory pour se passer de base
+	INGEST_TOKEN=dev-token SHIELD_STORAGE=$(SHIELD_STORAGE) ./.venv/bin/uvicorn shield.collector.api.app:app --reload --port 8000
 
 run-decoy:  ## Lance le leurre SSH en local (port 2222, sans privilège)
 	INGEST_TOKEN=dev-token ./.venv/bin/python -m shield.decoys.runner ssh --port 2222

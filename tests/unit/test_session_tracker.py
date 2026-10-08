@@ -2,8 +2,9 @@
 
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address
+from uuid import uuid4
 
-from shield.collector.ingest.session_tracker import SessionTracker
+from shield.collector.ingest.session_tracker import ResumedSession, SessionTracker
 from shield.common.schema import RawEvent, ServiceName
 
 T0 = datetime(2026, 9, 25, 10, 0, 0, tzinfo=UTC)
@@ -58,3 +59,29 @@ def test_les_sessions_inactives_sont_fermees():
     closed = tracker.close_expired(T0 + timedelta(seconds=1000))
     assert len(closed) == 1
     assert tracker.open_count == 0
+
+
+def resumed(last_seen_offset: float, ip="192.0.2.10") -> ResumedSession:
+    return ResumedSession(
+        session_id=uuid4(),
+        source_ip=ip,
+        service=ServiceName.SSH,
+        started_at=T0,
+        last_seen_at=T0 + timedelta(seconds=last_seen_offset),
+        event_count=2,
+    )
+
+
+def test_une_session_reprise_accueille_la_suite_de_l_attaque():
+    """#58 : après un redémarrage, l'attaque en cours garde sa session."""
+    tracker = SessionTracker(window_seconds=300)
+    session = resumed(60)
+    tracker.restore([session])
+    assert tracker.attach(event(120)) == session.session_id
+
+
+def test_la_reprise_garde_la_session_la_plus_recente():
+    tracker = SessionTracker(window_seconds=300)
+    old, recent = resumed(10), resumed(60)
+    tracker.restore([recent, old])
+    assert tracker.attach(event(120)) == recent.session_id

@@ -15,6 +15,7 @@ la soutenance — le jury demandera *pourquoi*, pas seulement *quoi*.
 | [005](005-typescript.md) | TypeScript plutôt que JavaScript | Accepté |
 | [006](006-docker-compose.md) | Docker Compose plutôt que Kubernetes | Accepté |
 | [007](007-ecrire-avant-enrichir.md) | Écrire en base avant d'enrichir | Accepté |
+| [008](008-relais-d-entree-des-leurres.md) | Exposer les leurres par un relais d'entrée et le PROXY protocol | **Proposé** |
 
 ## Modèle
 
