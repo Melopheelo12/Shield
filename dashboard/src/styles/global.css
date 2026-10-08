@@ -1,0 +1,145 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+}
+
+button:disabled {
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- filtres */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.filter-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------- tableau */
+
+.table-scroll {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.event-table table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.event-table th,
+.event-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.event-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.event-table th.num,
+.event-table td.num {
+  text-align: right;
+}
+
+.event-table tr.clickable {
+  cursor: pointer;
+}
+
+.event-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.service {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.score {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.score--low { color: var(--sev-low); }
+.score--medium { color: var(--sev-medium); }
+.score--high { color: var(--sev-high); }
+.score--critical { color: var(--sev-critical); }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap);
+  margin-top: var(--gap);
+}
+
+/* ----------------------------------------------------------------- états */
+
+.state {
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.state__title {
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.state--error .state__title {
+  color: var(--sev-critical);
+}
