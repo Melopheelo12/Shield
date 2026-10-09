@@ -1,41 +1,46 @@
+import { AttackFeed } from "../components/attacks/AttackFeed";
+import { ErrorState } from "../components/common/ErrorState";
+import { StatCard } from "../components/common/StatCard";
 import { useApi } from "../hooks/useApi";
 import type { Overview as OverviewStats } from "../types/events";
 
-/**
- * Vue d'ensemble — squelette du sprint 0.
- *
- * Volontairement minimal : il prouve que la chaîne API → types partagés → rendu
- * fonctionne, et il tourne sur le générateur d'événements factices sans qu'aucun
- * leurre ne soit déployé. Les cinq visualisations arrivent au sprint 3 (S3-08).
- */
+const number = new Intl.NumberFormat("fr-FR");
+
+/** Vue d'ensemble : quatre chiffres clés et le flux des dernières tentatives. */
 export function Overview() {
   const stats = useApi<OverviewStats>("/api/v1/stats/overview", 5000);
+  const data = stats.status === "ready" ? stats.data : null;
+  const show = (value: number | undefined) => (value === undefined ? "—" : number.format(value));
 
-  if (stats.status === "loading") return <p>Chargement…</p>;
-  if (stats.status === "error") return <p>Erreur : {stats.message}</p>;
-  if (stats.status === "empty" || stats.data.events === 0) {
-    return (
-      <main>
-        <h1>SHIELD</h1>
-        <p>
-          La collecte a commencé. Aucune tentative n'a encore été enregistrée — c'est
-          normal sur une instance neuve : les premiers balayages arrivent généralement
-          dans l'heure.
-        </p>
-      </main>
-    );
-  }
-
-  const { events, unique_ips, sessions, max_threat_score } = stats.data;
   return (
-    <main>
-      <h1>SHIELD</h1>
-      <dl>
-        <div><dt>Événements</dt><dd>{events.toLocaleString("fr-FR")}</dd></div>
-        <div><dt>IP uniques</dt><dd>{unique_ips.toLocaleString("fr-FR")}</dd></div>
-        <div><dt>Sessions</dt><dd>{sessions.toLocaleString("fr-FR")}</dd></div>
-        <div><dt>Menace max</dt><dd>{max_threat_score}/100</dd></div>
-      </dl>
-    </main>
+    <>
+      {stats.status === "error" && <ErrorState message={stats.message} onRetry={stats.reload} />}
+
+      <section className="grid grid--stats" aria-label="Chiffres clés">
+        <StatCard label="Tentatives enregistrées" value={show(data?.events)} />
+        <StatCard label="Adresses IP uniques" value={show(data?.unique_ips)} />
+        <StatCard label="Sessions d'attaque" value={show(data?.sessions)} />
+        <StatCard
+          label="Menace maximale"
+          value={data ? `${data.max_threat_score}/100` : "—"}
+          hint={data?.rejected ? `${number.format(data.rejected)} événement(s) rejeté(s)` : undefined}
+        />
+      </section>
+
+      {data?.events === 0 && (
+        <p className="panel muted">
+          La collecte a commencé. Aucune tentative n'a encore été enregistrée — c'est normal
+          sur une instance neuve : les premiers balayages arrivent généralement dans l'heure.
+        </p>
+      )}
+
+      <section className="panel" aria-labelledby="feed-title">
+        <div className="panel__head">
+          <h2 id="feed-title">En direct</h2>
+          <span className="panel__hint">actualisé toutes les 3 s</span>
+        </div>
+        <AttackFeed />
+      </section>
+    </>
   );
 }
