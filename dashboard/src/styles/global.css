@@ -739,3 +739,43 @@ button:disabled {
 .payload--tall {
   max-height: 320px;
 }
+
+/* ---------------------------------------------------------------- sandbox */
+
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.steps li {
+  display: grid;
+  gap: 4px;
+}
+
+.steps code {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.role {
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.role--red { color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 14%, transparent); }
+.role--blue { color: var(--accent); background: var(--accent-soft); }
+
+.data-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
