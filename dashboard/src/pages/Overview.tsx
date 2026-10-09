@@ -65,6 +65,7 @@ export function Overview() {
           <section className="panel" aria-labelledby="ips-title">
             <div className="panel__head">
               <h2 id="ips-title">Adresses les plus actives</h2>
+              <a className="panel__hint" href="#/defense">bloquer →</a>
             </div>
             <TopSourceIps />
           </section>
