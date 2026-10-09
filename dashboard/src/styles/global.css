@@ -586,3 +586,124 @@ button:disabled {
   border-radius: 3px;
   border: 1px solid var(--border);
 }
+
+/* ------------------------------------------------------- détail (tiroir) */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.drawer__head h2 {
+  font-size: 17px;
+}
+
+.drawer__section {
+  margin-top: 24px;
+}
+
+.drawer__section h3 {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.fields {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.field dt {
+  color: var(--muted);
+}
+
+.field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.payload {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  font: 12px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rules__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.rules__list p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.rules__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rules__points {
+  font-weight: 700;
+}
+
+.rules__total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.rules__total--broken {
+  color: var(--sev-critical);
+}
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.badge--low { color: var(--sev-low); background: color-mix(in srgb, var(--sev-low) 14%, transparent); }
+.badge--medium { color: var(--sev-medium); background: color-mix(in srgb, var(--sev-medium) 14%, transparent); }
+.badge--high { color: var(--sev-high); background: color-mix(in srgb, var(--sev-high) 14%, transparent); }
+.badge--critical { color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 16%, transparent); }
