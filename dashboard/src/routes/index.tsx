@@ -3,6 +3,7 @@ import type { IconName } from "../components/layout/icons";
 import { Attacks } from "../pages/Attacks";
 import { Defense } from "../pages/Defense";
 import { Overview } from "../pages/Overview";
+import { Sandbox } from "../pages/Sandbox";
 import { ThreatMap } from "../pages/ThreatMap";
 
 export interface AppRoute {
@@ -19,6 +20,7 @@ export const ROUTES: AppRoute[] = [
   { path: "carte", label: "Carte des menaces", icon: "map", render: () => <ThreatMap /> },
   { path: "journal", label: "Journal des attaques", icon: "journal", render: () => <Attacks /> },
   { path: "defense", label: "Défense", icon: "defense", render: () => <Defense /> },
+  { path: "sandbox", label: "Sandbox", icon: "sandbox", render: () => <Sandbox /> },
 ];
 
 export function findRoute(path: string): AppRoute {
