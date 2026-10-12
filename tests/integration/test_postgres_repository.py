@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from shield.collector.api import app as api
+from shield.collector.api.auth import create_access_token
 from shield.collector.defender import DefenderAgent, RuleEngine
 from shield.collector.enrichment.mitre import MitreMapper
 from shield.collector.ingest.session_tracker import SessionTracker
@@ -26,8 +27,8 @@ async def repository(pg_engine):
     return repo
 
 
-async def capture(repository, *, session_id: UUID | None = None, **fields):
-    """Le chemin d'ingestion de l'API, sans HTTP."""
+async def capture(repository, *, session_id: UUID | None = None, geo: dict | None = None, **fields):
+    """Le chemin d'ingestion de l'API, sans HTTP. ``geo`` tient lieu de GeoLite2."""
     body = dict(
         service="ssh",
         source_ip="198.51.100.7",
@@ -45,6 +46,7 @@ async def capture(repository, *, session_id: UUID | None = None, **fields):
         session_id=session_id or uuid4(),
         technique_id=MAPPER.map(raw),
         enrichment_status=EnrichmentStatus.PARTIAL,
+        **(geo or {}),
     )
     verdict = AGENT.evaluate(event, counters)
     event = event.model_copy(update={"threat_score": verdict.threat_score})
@@ -136,6 +138,44 @@ async def test_session_et_adresse_sont_agregees(repository, pg_engine):
     assert total == 2
 
 
+async def test_la_geolocalisation_est_conservee_et_jamais_effacee(repository, pg_engine):
+    """S2-01 : une base GeoLite2 plus récente corrige ; une base absente n'efface rien."""
+    await capture(repository, geo={"country_code": "NL", "asn": 64500, "as_org": "Ancien\x00"})
+    await capture(repository, geo={"country_code": "DE", "asn": 64501, "as_org": "Nouveau"})
+    await capture(repository)  # GeoLite2 indisponible pour cet événement
+
+    row = await fetch_one(
+        pg_engine, "SELECT country_code, asn, as_org FROM ip_intel WHERE ip = '198.51.100.7'"
+    )
+    assert tuple(row) == ("DE", 64501, "Nouveau")
+
+    [stored] = await repository.query(country="DE", limit=1)
+    assert (stored.country_code, stored.asn, stored.as_org) == ("DE", 64501, "Nouveau")
+
+
+async def test_la_reputation_differee_est_reprise_puis_close(repository, pg_engine):
+    """S2-03 / S2-05 : les adresses en attente sortent, la réputation les clôt."""
+    now = datetime.now(UTC)
+    await capture(repository, occurred_at=now - timedelta(minutes=5))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=now)
+
+    assert await repository.pending_reputation(10) == ["203.0.113.99", "198.51.100.7"]
+    assert await repository.pending_reputation(1) == ["203.0.113.99"]
+
+    await repository.apply_reputation("198.51.100.7", 91)
+    assert await repository.pending_reputation(10) == ["203.0.113.99"]
+
+    score, checked_at = await fetch_one(
+        pg_engine,
+        "SELECT reputation_score, reputation_checked_at FROM ip_intel WHERE ip = '198.51.100.7'",
+    )
+    assert score == 91 and checked_at is not None
+
+    [stored] = [e for e in await repository.query() if str(e.source_ip) == "198.51.100.7"]
+    assert stored.reputation_score == 91
+    assert stored.enrichment_status == EnrichmentStatus.DONE
+
+
 async def test_les_compteurs_respectent_les_fenetres(repository):
     now = datetime.now(UTC)
     await capture(repository, occurred_at=now - timedelta(hours=2))
@@ -182,6 +222,104 @@ async def test_les_statistiques(repository):
 
     assert [e.service.value for e in await repository.query(service="ftp")] == ["ftp"]
     assert len(await repository.query(limit=2)) == 2
+
+
+async def test_detail_de_session(repository):
+    """S3-04 : les règles d'une session sont agrégées, la plus lourde d'abord."""
+    session_id = uuid4()
+    await capture(repository, session_id=session_id)
+    _, worst = await capture(repository, session_id=session_id, password="toor")
+    await capture(repository)  # autre session, même adresse
+
+    detail = await repository.session_detail(session_id)
+    assert detail["event_count"] == 2 and len(detail["events"]) == 2
+    assert detail["threat_score"] == worst.threat_score
+    rules = {rule["rule_id"]: rule for rule in detail["rules"]}
+    assert rules["R-002"]["matches"] == 2
+    contributions = [rule["total_contribution"] for rule in detail["rules"]]
+    assert contributions == sorted(contributions, reverse=True)
+    assert await repository.session_detail(uuid4()) is None
+
+
+async def test_chronologie_et_pays(repository):
+    base = datetime(2026, 10, 12, 10, 0, tzinfo=UTC)
+    await repository.maintain(today=base.date())
+    await capture(repository, occurred_at=base + timedelta(minutes=5), geo={"country_code": "FR"})
+    await capture(repository, occurred_at=base + timedelta(minutes=50))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=base + timedelta(minutes=70))
+
+    timeline = await repository.timeline(base, timedelta(hours=1))
+    assert [(item["bucket"][:16], item["events"]) for item in timeline] == [
+        ("2026-10-12T10:00", 2),
+        ("2026-10-12T11:00", 1),
+    ]
+    assert await repository.by_country() == [
+        {"country_code": "FR", "events": 2, "unique_ips": 1},
+        {"country_code": None, "events": 1, "unique_ips": 1},
+    ]
+
+
+async def test_export_par_curseur_et_liste_de_blocage(repository):
+    now = datetime.now(UTC)
+    stored = [
+        (await capture(repository, occurred_at=now - timedelta(seconds=10 - i)))[0]
+        for i in range(5)
+    ]
+    first = await repository.export_page(None, None, None, 2)
+    cursor = (first[-1].occurred_at, first[-1].event_id)
+    rest = await repository.export_page(None, None, cursor, 10)
+    assert [e.event_id for e in first + rest] == [e.event_id for e in stored]
+
+    await capture(repository, source_ip="203.0.113.99", username="", password="")
+    hostile = await repository.hostile_ips(min_score=1, since=now - timedelta(days=1))
+    assert hostile[0] == "198.51.100.7"
+
+
+async def test_la_purge_rgpd(repository, pg_engine):
+    """S4-04 : partition expirée supprimée d'un bloc, reste supprimé ligne à ligne, journal."""
+    await repository.maintain(today=date(2025, 1, 15))
+    await capture(repository, occurred_at=datetime(2025, 1, 10, tzinfo=UTC))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=datetime.now(UTC))
+
+    summary = await repository.purge(datetime(2025, 6, 1, tzinfo=UTC))
+    assert summary["event_2025_01"] == 1
+    [exists] = await fetch_one(pg_engine, "SELECT to_regclass('event_2025_01') IS NOT NULL")
+    assert not exists
+    assert [str(e.source_ip) for e in await repository.query()] == ["203.0.113.99"]
+    assert summary["ip_intel"] == 1, "l'adresse disparue avec ses événements"
+    [jobs] = await fetch_one(pg_engine, "SELECT count(*) FROM retention_job")
+    assert jobs >= 2
+
+
+async def test_seuils_et_historique_des_alertes(repository):
+    thresholds = [
+        {
+            "id": "volume",
+            "metric": "events",
+            "threshold": 200.0,
+            "window_seconds": 300,
+            "silence_seconds": 3600,
+            "enabled": True,
+        }
+    ]
+    assert await repository.load_alert_thresholds() == []
+    await repository.save_alert_thresholds(thresholds)
+    assert await repository.load_alert_thresholds() == thresholds
+
+    when = datetime.now(UTC)
+    await repository.record_alert(
+        {
+            "threshold_id": "volume",
+            "triggered_at": when,
+            "value": 250.0,
+            "threshold": 200.0,
+            "status": "sent",
+            "channels": {"discord": "sent"},
+        }
+    )
+    [alert] = await repository.recent_alerts()
+    assert alert["threshold_id"] == "volume" and alert["value"] == 250.0
+    assert alert["channels"] == {"discord": "sent"}
 
 
 async def test_un_identifiant_hostile_ne_bloque_pas_l_ecriture(repository):
@@ -272,9 +410,12 @@ async def test_une_session_survit_au_redemarrage_du_collecteur(repository, pg_en
 async def test_chaine_complete_ingestion_vers_verdict(repository):
     api.app.state.repository = repository
     headers = {"X-Ingest-Token": api.INGEST_TOKEN}
+    token, _ = create_access_token("admin")
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=api.app), base_url="http://test"
+            transport=ASGITransport(app=api.app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
         ) as client:
             body = dict(
                 service="ssh",

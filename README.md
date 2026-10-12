@@ -207,7 +207,13 @@ make fake                     # terminal 2 — flux d'événements factices
 ```
 
 ```bash
-curl -s localhost:8000/api/v1/stats/overview
+# Toute consultation exige un jeton (US-19). En local, make run-api définit
+# ADMIN_PASSWORD=dev-admin.
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"dev-admin"}' | jq -r .access_token)
+
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/stats/overview
 # {"events":412,"unique_ips":308,"sessions":357,"max_threat_score":86,"rejected":0}
 ```
 
@@ -218,8 +224,9 @@ parallèle plutôt qu'en série.
 ### Vérifier l'explicabilité du score
 
 ```bash
-curl -s "localhost:8000/api/v1/events?min_score=60&limit=1"          # récupérer un event_id
-curl -s "localhost:8000/api/v1/events/<event_id>/verdict" | jq
+AUTH="Authorization: Bearer $TOKEN"
+curl -s -H "$AUTH" "localhost:8000/api/v1/events?min_score=60&limit=1"   # récupérer un event_id
+curl -s -H "$AUTH" "localhost:8000/api/v1/events/<event_id>/verdict" | jq
 ```
 
 ```json
@@ -236,13 +243,45 @@ curl -s "localhost:8000/api/v1/events/<event_id>/verdict" | jq
 `8 + 60 = 68`. C'est l'invariant que `Verdict.is_consistent()` vérifie et qu'un test
 unitaire protège.
 
+### Routes de l'API
+
+Documentation interactive hors production : `http://localhost:8000/api/docs`.
+
+| Route | Rôle | Accès |
+| :--- | :--- | :--- |
+| `POST /api/v1/ingest` | Réception d'un événement de leurre | `X-Ingest-Token` |
+| `POST /api/v1/auth/login` | Jeton d'exploitant (ralenti après 5 échecs) | public |
+| `GET /api/v1/events` · `/events/{id}/verdict` | Événements filtrés, verdict explicable | JWT |
+| `GET /api/v1/sessions/{id}` | Détail de session et règles déclenchées | JWT |
+| `GET /api/v1/stats/{overview,timeline,by-country,by-service,top-ips,top-credentials}` | Statistiques du tableau de bord | JWT |
+| `GET /api/v1/rules` | Règles de détection (rechargées à chaud) | JWT |
+| `GET·PUT /api/v1/alerts/thresholds` · `POST /alerts/test` · `GET /alerts` | Seuils, test, historique | JWT |
+| `GET /api/v1/export?format=csv\|json&pseudonymize=true` | Export par lots, en flux | JWT |
+| `GET /api/v1/blocklist` | Une adresse hostile par ligne, pour un pare-feu | JWT ou `X-Blocklist-Token` |
+| `GET /api/v1/watch` · `/watch/{cve}/events` | Veille KEV corrélée aux observations | JWT |
+| `GET /api/v1/sandbox/report?since=…` | Taux de détection d'une partie | JWT |
+| `WS /ws/events?token=…` | Flux temps réel | JWT en paramètre |
+| `GET /api/v1/health` | Sonde de vivacité | public |
+
 ### Déploiement complet
 
 ```bash
-cp .env.example .env && $EDITOR .env      # INGEST_TOKEN, POSTGRES_PASSWORD, JWT_SECRET
+cp .env.example .env && $EDITOR .env      # INGEST_TOKEN, POSTGRES_PASSWORD, JWT_SECRET, ADMIN_PASSWORD
 docker compose up -d
 docker compose ps
 ```
+
+Les scripts de `deploy/initdb` ne s'exécutent qu'à la création du volume PostgreSQL.
+Sur une base existante, appliquez les nouveaux à la main (ils sont idempotents) :
+
+```bash
+for f in deploy/initdb/003_enrichment.sql deploy/initdb/004_alerting.sql; do
+  docker compose exec -T postgres psql -U shield -d shield -v ON_ERROR_STOP=1 < "$f"
+done
+```
+
+En production (`SHIELD_ENV=prod`), le collecteur refuse de démarrer tant qu'un secret
+de `.env.example` (`change-me…`) n'a pas été remplacé.
 
 ### Sandbox d'entraînement
 
