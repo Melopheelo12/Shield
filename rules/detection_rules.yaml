@@ -143,10 +143,12 @@
   name: path-traversal-attempt
   description: >
     La requête contient une séquence de remontée de répertoire, utilisée pour tenter
-    de lire des fichiers en dehors du dossier prévu.
+    de lire des fichiers en dehors du dossier prévu — y compris sous forme encodée,
+    pour échapper aux filtres.
   severity: high
   weight: 40
   profile_hint: tentative_exploitation
+  version: 2
   condition:
     any:
       - field: payload
@@ -155,38 +157,83 @@
       - field: payload
         op: contains
         value: "..%2f"
+      - field: payload
+        op: contains
+        value: "%2e%2e"
+      - field: payload
+        op: contains
+        value: ".%2e/"
+      - field: payload
+        op: contains
+        value: "%2e./"
+      - field: payload
+        op: contains
+        value: "..%5c"
+      - field: payload
+        op: contains
+        value: "..\\"
 
 - id: R-010
   name: command-injection-attempt
   description: >
-    La requête contient des motifs d'injection de commande système. L'attaquant
-    cherche à faire exécuter ses propres instructions par le serveur.
+    La requête contient des motifs d'injection de commande système : téléchargement
+    puis exécution d'un programme, appel d'un interpréteur. L'attaquant cherche à
+    faire exécuter ses propres instructions par le serveur.
   severity: critical
   weight: 60
   profile_hint: tentative_exploitation
+  version: 2
   condition:
     any:
       - field: payload
         op: contains
-        value: ";wget "
+        value: ";wget"
       - field: payload
         op: contains
-        value: ";curl "
+        value: ";curl"
+      - field: payload
+        op: contains
+        value: "wget+http"
+      - field: payload
+        op: contains
+        value: "wget%20http"
+      - field: payload
+        op: contains
+        value: "curl+http"
+      - field: payload
+        op: contains
+        value: "|sh"
+      - field: payload
+        op: contains
+        value: "| sh"
+      - field: payload
+        op: contains
+        value: "chmod +x"
+      - field: payload
+        op: contains
+        value: "chmod+777"
+      - field: payload
+        op: contains
+        value: "busybox"
       - field: payload
         op: contains
         value: "$(("
       - field: payload
         op: contains
         value: "/bin/sh"
+      - field: payload
+        op: contains
+        value: "/bin/bash"
 
 - id: R-011
   name: sql-injection-attempt
   description: >
-    La requête contient des motifs d'injection SQL classiques, visant à détourner
-    une requête de base de données.
+    La requête contient des motifs d'injection SQL classiques, en clair ou encodés,
+    visant à détourner une requête de base de données.
   severity: high
   weight: 40
   profile_hint: tentative_exploitation
+  version: 2
   condition:
     any:
       - field: payload
@@ -194,7 +241,25 @@
         value: "' or '1'='1"
       - field: payload
         op: contains
+        value: "' or 1=1"
+      - field: payload
+        op: contains
+        value: "%27%20or%20"
+      - field: payload
+        op: contains
+        value: "%27+or+"
+      - field: payload
+        op: contains
         value: "union select"
+      - field: payload
+        op: contains
+        value: "union%20select"
+      - field: payload
+        op: contains
+        value: "union+select"
+      - field: payload
+        op: contains
+        value: "information_schema"
       - field: payload
         op: contains
         value: "sleep("
@@ -207,6 +272,7 @@
   severity: medium
   weight: 15
   profile_hint: balayage_opportuniste
+  version: 2
   condition:
     any:
       - field: payload
@@ -221,6 +287,27 @@
       - field: payload
         op: contains
         value: "python-requests"
+      - field: payload
+        op: contains
+        value: "nuclei"
+      - field: payload
+        op: contains
+        value: "sqlmap"
+      - field: payload
+        op: contains
+        value: "nikto"
+      - field: payload
+        op: contains
+        value: "nmap scripting engine"
+      - field: payload
+        op: contains
+        value: "gobuster"
+      - field: payload
+        op: contains
+        value: "wpscan"
+      - field: payload
+        op: contains
+        value: "go-http-client"
 
 - id: R-013
   name: oversized-payload
@@ -247,3 +334,144 @@
     field: counter.events_by_ip_24h
     op: gte
     value: 50
+
+- id: R-015
+  name: known-exploit-signature
+  description: >
+    La requête porte la signature d'une vulnérabilité connue et activement exploitée
+    (Log4Shell, Shellshock, PHPUnit, routeurs TP-Link…). Ce n'est plus de la
+    reconnaissance : c'est une tentative de prise de contrôle.
+  severity: critical
+  weight: 60
+  profile_hint: tentative_exploitation
+  # Mêmes motifs que les signatures de la veille (src/shield/collector/watch.py).
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "${jndi:"
+      - field: payload
+        op: contains
+        value: "() { :;};"
+      - field: payload
+        op: contains
+        value: "/.%2e/"
+      - field: payload
+        op: contains
+        value: "eval-stdin.php"
+      - field: payload
+        op: contains
+        value: "fgt_lang"
+      - field: payload
+        op: contains
+        value: "/mgmt/tm/util/bash"
+      - field: payload
+        op: contains
+        value: "/vpn/../vpns/"
+      - field: payload
+        op: contains
+        value: "/cgi-bin/luci/;stok="
+      - field: payload
+        op: contains
+        value: "connector.minimal.php"
+
+- id: R-016
+  name: xss-attempt
+  description: >
+    La requête tente d'injecter un script dans une page. Sur un site réel, il
+    s'exécuterait dans le navigateur des visiteurs.
+  severity: high
+  weight: 30
+  profile_hint: tentative_exploitation
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "<script"
+      - field: payload
+        op: contains
+        value: "%3cscript"
+      - field: payload
+        op: contains
+        value: "javascript:"
+      - field: payload
+        op: contains
+        value: "onerror="
+      - field: payload
+        op: contains
+        value: "%3csvg"
+
+- id: R-017
+  name: sensitive-file-probe
+  description: >
+    La requête réclame un fichier qui contient d'ordinaire des secrets : mots de
+    passe d'application, clés privées, historique du code source. Un seul de ces
+    fichiers exposé suffit souvent à compromettre tout un serveur.
+  severity: high
+  weight: 30
+  profile_hint: tentative_exploitation
+  condition:
+    any:
+      - field: payload
+        op: contains
+        value: "/.env"
+      - field: payload
+        op: contains
+        value: "/.git/"
+      - field: payload
+        op: contains
+        value: "wp-config"
+      - field: payload
+        op: contains
+        value: "id_rsa"
+      - field: payload
+        op: contains
+        value: "/.aws/"
+      - field: payload
+        op: contains
+        value: "/.ssh/"
+      - field: payload
+        op: contains
+        value: "/etc/passwd"
+      - field: payload
+        op: contains
+        value: "phpinfo"
+
+- id: R-018
+  name: bruteforce-other-services
+  description: >
+    Plus de vingt tentatives d'authentification depuis la même adresse sur le leurre
+    FTP ou sur la page d'administration en moins de cinq minutes : un dictionnaire
+    automatisé, comme sur SSH.
+  severity: high
+  weight: 35
+  window_seconds: 300
+  profile_hint: force_brute_ciblee
+  condition:
+    all:
+      - field: service
+        op: in
+        value: [ftp, http]
+      - field: counter.auth_attempts_by_ip
+        op: gte
+        value: 20
+
+- id: R-019
+  name: credential-attempt-on-decoy
+  description: >
+    Un identifiant a été essayé sur un leurre. Aucun utilisateur légitime ne se
+    connecte à un leurre : même isolée, la tentative est hostile. Seule, elle pèse
+    peu ; répétée, d'autres règles prennent le relais.
+  severity: low
+  weight: 5
+  profile_hint: force_brute_ciblee
+  condition:
+    any:
+      - not:
+          field: username
+          op: is_empty
+          value: true
+      - not:
+          field: password
+          op: is_empty
+          value: true
