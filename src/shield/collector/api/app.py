@@ -54,7 +54,7 @@ from shield.collector.ingest.session_tracker import SessionTracker
 from shield.collector.realtime import Broadcaster, next_frame
 from shield.collector.repositories import EventRepository, build_repository
 from shield.collector.sandbox import sandbox_report
-from shield.collector.watch import fetch_kev, refresh, run_daily, signature_for
+from shield.collector.watch import correlate, fetch_kev, refresh, run_daily, signature_for
 from shield.common.schema import (
     NormalizedEvent,
     RawEvent,
@@ -72,6 +72,7 @@ ENRICHMENT_INTERVAL_SECONDS = 30
 RULES_RELOAD_INTERVAL_SECONDS = 10
 MAX_TIMELINE_BUCKETS = 1000
 ALERT_REARM_INTERVAL_SECONDS = 15
+WATCH_CORRELATION_SECONDS = int(os.getenv("WATCH_CORRELATION_SECONDS", "3600"))
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         background += [
             asyncio.create_task(first_watch(repository)),
             asyncio.create_task(run_daily(lambda: refresh(repository, fetch_kev))),
+            asyncio.create_task(
+                run_periodically(lambda: correlate(repository), WATCH_CORRELATION_SECONDS)
+            ),
         ]
     try:
         yield
