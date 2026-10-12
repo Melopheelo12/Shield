@@ -52,8 +52,11 @@ protection contre l'attaquant qui lit ce fichier.
 - Le compteur d'échecs est en mémoire : un redémarrage le remet à zéro.
 - Le jeton du WebSocket peut apparaître dans les journaux d'accès de nginx ; sa durée
   de vie courte (30 min) limite l'exposition.
-- `app_user`, `api_token` et `passlib` deviennent inutilisés : à retirer, ou à garder
-  pour une v2 multi-comptes.
+- `app_user` et `api_token` deviennent inutilisés : à retirer, ou à garder pour une v2
+  multi-comptes. `passlib` est retiré des dépendances.
+- Bibliothèque JWT : **PyJWT**, et non `python-jose`, qui porte une vulnérabilité sans
+  correctif (CVE-2026-85394, confusion de clés HMAC — non exploitable ici puisque seul
+  HS256 est accepté, mais une brique d'authentification ne garde pas de dette connue).
 
 ## Alternatives écartées
 

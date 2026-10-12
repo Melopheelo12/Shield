@@ -1,7 +1,10 @@
 """Authentification du tableau de bord (S3-01) : jeton obligatoire, force brute ralentie."""
 
+import base64
+import json
 from datetime import UTC, datetime, timedelta
 
+import jwt as pyjwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -35,7 +38,7 @@ class Clock:
 def admin(monkeypatch):
     monkeypatch.setenv("ADMIN_USERNAME", "exploitant")
     monkeypatch.setenv("ADMIN_PASSWORD", "un-vrai-mot-de-passe")
-    monkeypatch.setenv("JWT_SECRET", "secret-de-test-" + "x" * 32)
+    monkeypatch.setenv("JWT_SECRET", "secret-de-test-" + "x" * 64)
     monkeypatch.setattr(auth, "throttle", auth.LoginThrottle())
 
 
@@ -78,14 +81,29 @@ async def test_connexion_puis_consultation(client):
     assert me.json() == {"username": "exploitant"}
 
 
+def unsigned_token() -> str:
+    """Jeton ``alg=none`` forgé à l'exécution : aucun secret littéral dans le dépôt."""
+
+    def part(data: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
+
+    return f"{part({'alg': 'none'})}.{part({'sub': 'admin', 'exp': 4_102_444_800})}."
+
+
+def other_algorithm_token() -> str:
+    """Bon secret, mauvais algorithme : seul HS256 est accepté."""
+    return pyjwt.encode(
+        {"sub": "admin", "exp": 4_102_444_800}, auth._jwt_secret(), algorithm="HS512"
+    )
+
+
 @pytest.mark.parametrize(
-    "token",
-    [
-        "pas-un-jeton",
-        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9.",  # alg=none
-    ],
+    "make_token",
+    [lambda: "pas-un-jeton", unsigned_token, other_algorithm_token],
+    ids=["illisible", "alg-none", "autre-algorithme"],
 )
-async def test_un_jeton_invalide_est_refuse(client, token):
+async def test_un_jeton_invalide_est_refuse(client, make_token):
+    token = make_token()
     response = await client.get("/api/v1/events", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 401
 

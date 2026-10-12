@@ -24,9 +24,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,8 @@ INSECURE_PREFIX = "change-me"
 
 
 def _jwt_secret() -> str:
-    return os.getenv("JWT_SECRET", "change-me-jwt-secret")
+    # Défaut de développement : 32 octets au moins (RFC 7518 § 3.2), refusé en production.
+    return os.getenv("JWT_SECRET", "change-me-jwt-secret-dev-only-not-for-production")
 
 
 def _ttl() -> timedelta:
@@ -73,10 +74,16 @@ def create_access_token(username: str, now: datetime | None = None) -> tuple[str
 
 
 def decode_access_token(token: str) -> str | None:
-    """Le nom de l'exploitant, ou ``None`` pour un jeton invalide, expiré ou falsifié."""
+    """Le nom de l'exploitant, ou ``None`` pour un jeton invalide, expiré ou falsifié.
+
+    L'algorithme est imposé (``HS256`` seul) : un jeton ``alg=none`` ou signé avec une
+    clé publique est refusé quel que soit son en-tête.
+    """
     try:
-        claims = jwt.decode(token, _jwt_secret(), algorithms=[ALGORITHM])
-    except JWTError:
+        claims = jwt.decode(
+            token, _jwt_secret(), algorithms=[ALGORITHM], options={"require": ["exp", "sub"]}
+        )
+    except jwt.InvalidTokenError:
         return None
     subject = claims.get("sub")
     return subject if isinstance(subject, str) and subject else None
