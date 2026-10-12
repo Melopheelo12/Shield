@@ -102,6 +102,14 @@ def test_toute_tentative_d_identifiant_sur_un_leurre_compte(service, username, p
     assert 0 < verdict.threat_score < 20
 
 
+def test_le_compte_appat_signale_une_attaque_ciblee():
+    """« atelier » n'existe que dans l'énumération WordPress du leurre HTTP."""
+    _, verdict = verdict_for("http", username="atelier", password="Menuiserie2021")
+    assert "R-020" in {match.rule_id for match in verdict.matches}
+    assert verdict.profile is AttackerProfile.TARGETED_BRUTEFORCE
+    assert verdict.threat_score >= 30
+
+
 @pytest.mark.parametrize("service", ["ftp", "http"])
 def test_la_force_brute_est_reconnue_sur_tous_les_services(service):
     counters = {"auth_attempts_by_ip": 25, "distinct_services_by_ip": 1, "events_by_ip_24h": 25}

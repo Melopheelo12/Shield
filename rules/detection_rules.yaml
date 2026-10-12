@@ -475,3 +475,18 @@
           field: password
           op: is_empty
           value: true
+
+- id: R-020
+  name: enumerated-bait-account
+  description: >
+    L'identifiant essayé n'existe que dans les pages que notre site laisse fuiter
+    volontairement. L'attaquant a donc d'abord fait de la reconnaissance sur le site,
+    puis s'en sert : ce n'est plus un dictionnaire aveugle, c'est une attaque ciblée.
+  severity: high
+  weight: 30
+  profile_hint: force_brute_ciblee
+  # Doit rester égal à BAIT_USER (src/shield/decoys/site.py).
+  condition:
+    field: username
+    op: eq
+    value: atelier
