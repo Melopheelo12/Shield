@@ -4,8 +4,10 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY src ./src
+# /archive : seul dossier inscriptible du conteneur (racine en lecture seule).
 RUN pip install --no-cache-dir . && \
-    groupadd -g 10002 shield && useradd -u 10002 -g shield -s /usr/sbin/nologin shield
+    groupadd -g 10002 shield && useradd -u 10002 -g shield -s /usr/sbin/nologin shield && \
+    mkdir /archive && chown 10002:10002 /archive
 
 COPY rules ./rules
 USER 10002:10002

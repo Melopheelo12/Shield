@@ -1,6 +1,10 @@
 """Le collecteur branché sur PostgreSQL (S1-06) : écriture, relecture, agrégats, chaîne complète."""
 
+import csv
 import dataclasses
+import gzip
+import hashlib
+import json
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -289,6 +293,50 @@ async def test_la_purge_rgpd(repository, pg_engine):
     assert summary["ip_intel"] == 1, "l'adresse disparue avec ses événements"
     [jobs] = await fetch_one(pg_engine, "SELECT count(*) FROM retention_job")
     assert jobs >= 2
+
+
+async def test_archivage_des_mois_anciens(repository, pg_engine, tmp_path):
+    """Le mois archivé est lisible seul, vérifié, puis sa partition est supprimée."""
+    await repository.maintain(today=date(2025, 1, 15))
+    for day in (3, 17):
+        await capture(repository, occurred_at=datetime(2025, 1, day, tzinfo=UTC))
+    await capture(repository, occurred_at=datetime.now(UTC))
+
+    archived = await repository.archive_partitions(date(2025, 2, 1), tmp_path)
+    assert [(a["partition"], a["rows"]) for a in archived] == [("event_2025_01", 2)]
+
+    with gzip.open(tmp_path / "event_2025_01.csv.gz", "rt", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 2 and {row["service"] for row in rows} == {"ssh"}
+    manifest = json.loads((tmp_path / "event_2025_01.json").read_text("utf-8"))
+    digest = hashlib.sha256((tmp_path / "event_2025_01.csv.gz").read_bytes()).hexdigest()
+    assert manifest["sha256"] == digest and manifest["rows"] == 2
+    assert not list(tmp_path.glob("*.tmp"))
+
+    [exists] = await fetch_one(pg_engine, "SELECT to_regclass('event_2025_01') IS NOT NULL")
+    assert not exists
+    assert len(await repository.query()) == 1, "le mois courant n'est pas touché"
+    [logged] = await fetch_one(
+        pg_engine, "SELECT count(*) FROM retention_job WHERE partition = 'archive:event_2025_01'"
+    )
+    assert logged == 1
+
+
+async def test_allegement_et_mesure_du_stockage(repository):
+    old, _ = await capture(
+        repository,
+        occurred_at=datetime.now(UTC) - timedelta(days=40),
+        payload=b"GET /.env HTTP/1.1",
+    )
+    recent, _ = await capture(repository, payload=b"GET / HTTP/1.1")
+    assert await repository.lighten_payloads(datetime.now(UTC) - timedelta(days=30)) == 1
+    stored = {e.event_id: e for e in await repository.query()}
+    assert stored[old.event_id].payload == b""
+    assert stored[old.event_id].payload_sha256 == old.payload_sha256
+    assert stored[recent.event_id].payload == b"GET / HTTP/1.1"
+
+    tables = {row["table"] for row in await repository.storage_usage()}
+    assert {"ip_intel", "session", "rule_match"} <= tables
 
 
 async def test_seuils_et_historique_des_alertes(repository):

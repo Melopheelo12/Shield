@@ -99,6 +99,7 @@ services:
     volumes:
       - ./rules:/app/rules:ro
       - geolite2:/data/geolite2:ro
+      - archives:/archive          # mois archivés (CSV compressés), purgés à RETENTION_DAYS
     networks: [ingest_net, core_net, data_net, web_net]
     depends_on:
       postgres: { condition: service_healthy }
@@ -163,3 +164,4 @@ volumes:
   pgdata: {}
   geolite2: {}
   certs: {}
+  archives: {}

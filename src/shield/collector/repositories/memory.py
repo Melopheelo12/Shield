@@ -8,7 +8,8 @@ référence pour les tests unitaires et pour développer sans PostgreSQL
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -113,6 +114,21 @@ class InMemoryEventRepository:
                 worst[ip] = max(worst.get(ip, 0), event.threat_score)
         ranked = sorted(worst.items(), key=lambda item: (-item[1], item[0]))
         return [ip for ip, score in ranked if score >= min_score]
+
+    async def lighten_payloads(self, before: datetime) -> int:
+        lightened = 0
+        for index in range(len(self.events)):
+            event = self.events[index]
+            if event.occurred_at < before and event.payload:
+                self.events[index] = event.model_copy(update={"payload": b""})
+                lightened += 1
+        return lightened
+
+    async def archive_partitions(self, before: date, directory: Path) -> list[dict[str, Any]]:
+        return []  # pas de partitions en mémoire : rien à archiver
+
+    async def storage_usage(self) -> list[dict[str, Any]]:
+        return [{"table": "event (mémoire)", "bytes": sum(len(e.payload) for e in self.events)}]
 
     async def purge(self, cutoff: datetime) -> dict[str, int]:
         kept = [event for event in self.events if event.occurred_at >= cutoff]

@@ -51,6 +51,7 @@ from shield.collector.enrichment.mitre import MitreMapper
 from shield.collector.enrichment.reputation import ReputationEnricher, enrich_pending
 from shield.collector.exports import csv_stream, json_stream
 from shield.collector.ingest.session_tracker import SessionTracker
+from shield.collector.lifecycle import LifecycleSettings, run_lifecycle
 from shield.collector.realtime import Broadcaster, next_frame
 from shield.collector.repositories import EventRepository, build_repository
 from shield.collector.sandbox import sandbox_report
@@ -137,7 +138,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(run_periodically(alerts.rearm, ALERT_REARM_INTERVAL_SECONDS)),
         asyncio.create_task(run_periodically(repository.maintain, MAINTENANCE_INTERVAL_SECONDS)),
         asyncio.create_task(
-            run_periodically(lambda: purge_expired(repository), MAINTENANCE_INTERVAL_SECONDS)
+            run_periodically(
+                lambda: run_lifecycle(repository, LifecycleSettings.from_env()),
+                MAINTENANCE_INTERVAL_SECONDS,
+            )
         ),
         asyncio.create_task(
             run_periodically(
@@ -493,10 +497,26 @@ async def get_sandbox_report(
     return await sandbox_report(repository, since)
 
 
-async def purge_expired(repository: EventRepository) -> dict[str, int]:
-    """Purge quotidienne RGPD (US-46) : ``RETENTION_DAYS`` jours, 365 par défaut."""
-    days = int(os.getenv("RETENTION_DAYS", "365"))
-    return await repository.purge(datetime.now(UTC) - timedelta(days=days))
+@app.get("/api/v1/storage", tags=["exploitation"], dependencies=AUTHENTICATED)
+async def storage(repository: Repository) -> dict[str, object]:
+    """Place occupée par les tables et les archives : décider des seuils sur des chiffres."""
+    settings = LifecycleSettings.from_env()
+    archives = []
+    if settings.archive_dir is not None and settings.archive_dir.is_dir():
+        archives = [
+            {"file": path.name, "bytes": path.stat().st_size}
+            for path in sorted(settings.archive_dir.glob("event_*.csv.gz"))
+        ]
+    return {
+        "tables": await repository.storage_usage(),
+        "archives": archives,
+        "settings": {
+            "payload_retention_days": settings.payload_retention_days,
+            "archive_after_months": settings.archive_after_months,
+            "retention_days": settings.retention_days,
+            "archive_dir": str(settings.archive_dir) if settings.archive_dir else None,
+        },
+    }
 
 
 class ThresholdsUpdate(BaseModel):
