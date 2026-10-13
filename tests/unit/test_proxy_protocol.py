@@ -123,3 +123,12 @@ def test_le_relais_expose_chaque_leurre():
     edge = COMPOSE["services"]["edge"]
     assert set(edge["depends_on"]) == set(DECOYS)
     assert len(edge["ports"]) == len(DECOYS)
+
+
+def test_le_relais_ne_coupe_pas_le_leurre_quand_le_client_ferme_son_ecriture():
+    """Invariant 1 : un client qui envoie puis ferme son côté écriture (`nc < fichier`)
+    doit encore produire un événement. Sans `proxy_half_close`, nginx coupe aussi la
+    connexion vers le leurre, qui n'émet rien en SSH ni en FTP."""
+    with open("deploy/edge.conf", encoding="utf-8") as handle:
+        directives = [line.split("#")[0].strip() for line in handle]
+    assert "proxy_half_close on;" in directives
