@@ -28,6 +28,10 @@ services:
       SANDBOX_RUN: "true"
     volumes: ["./rules:/app/rules:ro"]
     networks: [sandbox_net]
+    # Le collecteur exige le schéma au démarrage (#51) : il attend la base.
+    depends_on:
+      sandbox-postgres: { condition: service_healthy }
+      sandbox-redis: { condition: service_started }
 
   sandbox-decoy-ssh:
     build:
@@ -40,6 +44,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     networks: [sandbox_net]
+    depends_on: [sandbox-collector]
 
   sandbox-postgres:
     image: postgres:16-alpine
@@ -47,7 +52,14 @@ services:
       POSTGRES_USER: shield
       POSTGRES_PASSWORD: sandbox
       POSTGRES_DB: shield_sandbox
+    # Même schéma que la production, appliqué à la création du volume.
+    volumes: ["./deploy/initdb:/docker-entrypoint-initdb.d:ro"]
     networks: [sandbox_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shield -d shield_sandbox"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   sandbox-redis:
     image: redis:7-alpine
