@@ -11,7 +11,8 @@ React 18 + TypeScript + Vite. Thème sombre par défaut, aucune ressource extern
 make dev        # collecteur en mémoire + attaques factices + tableau de bord
 ```
 
-Le navigateur s'ouvre sur <http://localhost:5173>. `RATE=10 make dev` accélère
+Le navigateur s'ouvre sur <http://localhost:5173> ; connectez-vous avec
+`admin` / `dev-admin` (compte de développement). `RATE=10 make dev` accélère
 les attaques simulées ; Ctrl+C arrête tout. Aucun leurre n'est exposé.
 
 ## Les pages
