@@ -1,0 +1,17 @@
+[Unit]
+Description=SHIELD — liste de blocage appliquée aux services réels (nftables)
+Documentation=file:///opt/shield/scripts/apply_blocklist.sh
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shield/scripts/apply_blocklist.sh
+# Code 2 : liste injoignable, règles en place conservées — ce n'est pas un échec.
+SuccessExitStatus=2
+# Le script n'a besoin que de nftables et du réseau.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
