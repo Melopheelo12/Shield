@@ -7,6 +7,7 @@ import { formatCountry, formatTimestamp } from "../../utils/format";
 import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
 import { RuleContributions } from "./RuleContributions";
+import { SessionSummary } from "./SessionSummary";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -77,6 +78,13 @@ export function AttackDetailDrawer({ event, onClose }: { event: NormalizedEvent;
             </>
           )}
         </section>
+
+        {event.session_id && (
+          <section className="drawer__section" aria-labelledby="session-title">
+            <h3 id="session-title">Session de cet attaquant</h3>
+            <SessionSummary sessionId={event.session_id} />
+          </section>
+        )}
 
         <section className="drawer__section" aria-labelledby="payload-title">
           <h3 id="payload-title">
