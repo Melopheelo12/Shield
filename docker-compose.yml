@@ -110,6 +110,28 @@ services:
       timeout: 5s
       retries: 3
 
+  # Bases GeoLite2 (pays, opérateur) : téléchargées puis rafraîchies toutes les
+  # 72 h dans le volume que le collecteur lit. Optionnel (compte MaxMind gratuit) :
+  # activé par COMPOSE_PROFILES=geoip dans le .env. Ne reçoit que ses deux
+  # variables, pas le .env complet.
+  geoipupdate:
+    image: maxmindinc/geoipupdate:v7.1.1
+    container_name: shield-geoipupdate
+    profiles: [geoip]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=64m"]
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID: ${GEOIPUPDATE_ACCOUNT_ID:-}
+      GEOIPUPDATE_LICENSE_KEY: ${GEOIPUPDATE_LICENSE_KEY:-}
+      GEOIPUPDATE_EDITION_IDS: GeoLite2-City GeoLite2-ASN
+      GEOIPUPDATE_FREQUENCY: "72"
+    volumes:
+      - geolite2:/usr/share/GeoIP
+    networks: [core_net]
+
   # ------------------------------------------------------------ ZONE DONNEES
   postgres:
     image: postgres:16-alpine
