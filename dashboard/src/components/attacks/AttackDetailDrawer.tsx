@@ -1,18 +1,12 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useApi } from "../../hooks/useApi";
-import type { AttackerProfile, NormalizedEvent, Verdict } from "../../types/events";
+import type { NormalizedEvent, Verdict } from "../../types/events";
 import { decodePayload } from "../../utils/base64";
+import { PROFILES } from "../../utils/constants";
 import { formatCountry, formatTimestamp } from "../../utils/format";
 import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
 import { RuleContributions } from "./RuleContributions";
-
-const PROFILES: Record<AttackerProfile, string> = {
-  balayage_opportuniste: "Balayage opportuniste",
-  force_brute_ciblee: "Force brute ciblée",
-  tentative_exploitation: "Tentative d'exploitation",
-  indetermine: "Indéterminé",
-};
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
