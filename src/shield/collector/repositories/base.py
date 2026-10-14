@@ -12,7 +12,8 @@ mémoire : c'est le prix d'un seul contrat pour les deux.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -76,6 +77,15 @@ class EventRepository(Protocol):
 
     async def purge(self, cutoff: datetime) -> dict[str, int]:
         """Supprime tout ce qui précède ``cutoff``. Retourne le nombre de lignes par table."""
+
+    async def lighten_payloads(self, before: datetime) -> int:
+        """Efface la charge utile des événements antérieurs à ``before`` ; l'empreinte reste."""
+
+    async def archive_partitions(self, before: date, directory: Path) -> list[dict[str, Any]]:
+        """Archive en fichier puis supprime les mois entièrement antérieurs à ``before``."""
+
+    async def storage_usage(self) -> list[dict[str, Any]]:
+        """Taille des tables, pour décider des seuils de conservation sur des chiffres réels."""
 
     # -- veille (US-39, US-40) ---------------------------------------------------
 

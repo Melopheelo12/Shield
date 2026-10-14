@@ -16,10 +16,15 @@ Les compteurs de fenêtre glissante sont calculés ici en SQL (index
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
 import logging
+import os
 import re
 from datetime import UTC, date, datetime, timedelta
 from ipaddress import ip_address
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -428,19 +433,7 @@ class PostgresEventRepository:
         """
         summary: dict[str, int] = {}
         async with self._sessions.begin() as db:
-            children = await db.execute(
-                text(
-                    "SELECT c.relname FROM pg_inherits i "
-                    "JOIN pg_class c ON c.oid = i.inhrelid "
-                    "WHERE i.inhparent = 'event'::regclass"
-                )
-            )
-            for name in sorted(children.scalars()):
-                found = _PARTITION_NAME.fullmatch(name)
-                if found is None:
-                    continue  # event_default
-                year, month = int(found[1]), int(found[2])
-                first_day_after = date(year + month // 12, month % 12 + 1, 1)
+            for name, _, first_day_after in await self._event_partitions(db):
                 if first_day_after > cutoff.date():
                     continue
                 # Nom vérifié par l'expression régulière : aucune donnée externe ici.
@@ -467,6 +460,120 @@ class PostgresEventRepository:
                 summary[label] = result.rowcount  # type: ignore[attr-defined]
         logger.info("purge RGPD avant %s : %s", cutoff.date(), summary)
         return summary
+
+    @staticmethod
+    async def _event_partitions(db: AsyncSession) -> list[tuple[str, date, date]]:
+        """Partitions mensuelles d'``event`` : (nom, premier jour, premier jour suivant).
+
+        ``event_default`` et tout nom inattendu sont ignorés : seul un nom vérifié par
+        ``_PARTITION_NAME`` peut ensuite apparaître dans une requête.
+        """
+        children = await db.execute(
+            text(
+                "SELECT c.relname FROM pg_inherits i "
+                "JOIN pg_class c ON c.oid = i.inhrelid "
+                "WHERE i.inhparent = 'event'::regclass"
+            )
+        )
+        partitions = []
+        for name in sorted(children.scalars()):
+            found = _PARTITION_NAME.fullmatch(name)
+            if found is None:
+                continue
+            year, month = int(found[1]), int(found[2])
+            first_day = date(year, month, 1)
+            partitions.append((name, first_day, date(year + month // 12, month % 12 + 1, 1)))
+        return partitions
+
+    async def lighten_payloads(self, before: datetime) -> int:
+        """Efface la charge utile des événements antérieurs à ``before``. L'empreinte reste."""
+        async with self._sessions.begin() as db:
+            result = await db.execute(
+                update(Event)
+                .where(Event.occurred_at < before, Event.payload_excerpt.is_not(None))
+                .values(payload_excerpt=None)
+                .execution_options(synchronize_session=False)
+            )
+        lightened: int = result.rowcount  # type: ignore[attr-defined]
+        return lightened
+
+    async def archive_partitions(self, before: date, directory: Path) -> list[dict[str, Any]]:
+        """Archive puis supprime chaque partition mensuelle entièrement antérieure à ``before``.
+
+        Ordre de sûreté : le fichier est écrit sous un nom temporaire, puis renommé ; le
+        nombre de lignes copiées est comparé à celui de la partition **dans la même
+        transaction que le DROP**. Au moindre écart, rien n'est supprimé.
+        """
+        async with self._sessions() as db:
+            eligible = [name for name, _, end in await self._event_partitions(db) if end <= before]
+        archived = []
+        for name in eligible:
+            path = directory / f"{name}.csv.gz"
+            copied, digest = await self._copy_partition(name, path)
+            async with self._sessions.begin() as db:
+                count_sql = f'SELECT count(*) FROM "{name}"'  # noqa: S608  # nosec B608
+                rows = (await db.execute(text(count_sql))).scalar_one()
+                if rows != copied:
+                    logger.error(
+                        "archive %s : %s lignes copiées, %s en base — rien supprimé",
+                        name,
+                        copied,
+                        rows,
+                    )
+                    continue
+                await db.execute(text(f'DROP TABLE "{name}"'))
+                await self._log_retention(
+                    db, datetime.combine(before, datetime.min.time(), UTC), f"archive:{name}", rows
+                )
+            manifest = {
+                "partition": name,
+                "rows": rows,
+                "sha256": digest,
+                "archived_at": datetime.now(UTC).isoformat(),
+                "file": path.name,
+            }
+            (directory / f"{name}.json").write_text(json.dumps(manifest, indent=2), "utf-8")
+            archived.append(manifest)
+            logger.info("partition %s archivée : %s lignes → %s", name, rows, path)
+        return archived
+
+    async def _copy_partition(self, name: str, path: Path) -> tuple[int, str]:
+        """``COPY … TO STDOUT`` en CSV compressé. Retourne (lignes copiées, SHA-256 du fichier)."""
+        temporary = path.with_name(path.name + ".tmp")
+        digest = hashlib.sha256()
+        # Nom vérifié par _PARTITION_NAME. Le service est joint : l'archive se lit seule.
+        query = (
+            f'SELECT e.*, s.name AS service FROM "{name}" e '  # noqa: S608  # nosec B608
+            "JOIN decoy_service s ON s.id = e.service_id ORDER BY e.occurred_at, e.id"
+        )
+        async with self._engine.connect() as conn:
+            raw = await conn.get_raw_connection()
+            with gzip.open(temporary, "wb") as archive:
+
+                async def sink(chunk: bytes) -> None:
+                    archive.write(chunk)
+
+                status = await raw.driver_connection.copy_from_query(
+                    query, output=sink, format="csv", header=True
+                )
+        with temporary.open("rb") as written:
+            for block in iter(lambda: written.read(1 << 20), b""):
+                digest.update(block)
+        os.replace(temporary, path)
+        return int(str(status).split()[-1]), digest.hexdigest()
+
+    async def storage_usage(self) -> list[dict[str, Any]]:
+        """Taille sur disque des tables, index compris, les plus lourdes d'abord."""
+        async with self._sessions() as db:
+            rows = await db.execute(
+                text(
+                    "SELECT c.relname, pg_total_relation_size(c.oid) "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind = 'r' AND n.nspname = current_schema() "
+                    "ORDER BY 2 DESC"
+                )
+            )
+            return [{"table": name, "bytes": size} for name, size in rows]
 
     @staticmethod
     async def _log_retention(

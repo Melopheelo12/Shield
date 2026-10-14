@@ -401,7 +401,8 @@ shield/
 | :--- | :--- |
 | Base légale | Intérêt légitime — sécurité du système d'information |
 | Minimisation | Aucune donnée collectée en dehors de l'événement d'attaque lui-même |
-| Conservation | 12 mois par défaut, configurable, purge quotidienne journalisée |
+| Conservation | 12 mois par défaut, configurable, purge quotidienne journalisée — **archives comprises** |
+| Volume | Charge utile effacée après 30 jours (l'empreinte reste) ; mois archivés en CSV compressé après 3 mois puis retirés de la base ; `GET /api/v1/storage` donne la place réelle |
 | Pseudonymisation | Troncature du dernier octet des adresses IPv4 sur toute donnée publiée |
 | Exclusion définitive | Aucune riposte active, aucun honeypot à forte interaction, aucune exécution de charge malveillante |
 
