@@ -1,6 +1,7 @@
 import { Blocklist } from "../components/defense/Blocklist";
 import { DetectionRules } from "../components/defense/DetectionRules";
 import { EmergencyStop } from "../components/defense/EmergencyStop";
+import { ExportPanel } from "../components/defense/ExportPanel";
 
 /** Contrer : bloquer les sources les plus dangereuses, connaître les règles, savoir couper. */
 export function Defense() {
@@ -12,6 +13,14 @@ export function Defense() {
           <span className="panel__hint">à relire avant de l'appliquer sur vos pare-feux</span>
         </div>
         <Blocklist />
+      </section>
+
+      <section className="panel" aria-labelledby="export-title">
+        <div className="panel__head">
+          <h2 id="export-title">Export des événements</h2>
+          <span className="panel__hint">pour une analyse hors ligne</span>
+        </div>
+        <ExportPanel />
       </section>
 
       <div className="grid grid--2">
