@@ -1,49 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { bucketize } from "../src/utils/timeline";
-import type { ServiceName } from "../src/types/events";
+import { fillTimeline, PERIODS } from "../src/utils/timeline";
 
-const at = (iso: string, service: ServiceName = "ssh") => ({ occurred_at: iso, service });
+const HOUR = 3_600_000;
+const t = (iso: string) => Date.parse(iso);
+const point = (bucket: string, events: number, max_threat_score = 0) => ({ bucket, events, max_threat_score });
 
-describe("bucketize — chronologie", () => {
-  it("ne produit rien sans événement", () => {
-    expect(bucketize([]).buckets).toEqual([]);
+describe("fillTimeline — chronologie de l'API", () => {
+  it("garde les tranches vides entre deux pics", () => {
+    const slots = fillTimeline(
+      [point("2026-10-14T08:00:00+00:00", 3, 40), point("2026-10-14T11:00:00+00:00", 1, 90)],
+      t("2026-10-14T07:30:00Z"),
+      HOUR,
+      t("2026-10-14T11:20:00Z"),
+    );
+    expect(slots.map((slot) => [new Date(slot.start).toISOString().slice(11, 16), slot.events, slot.maxScore])).toEqual([
+      ["07:00", 0, 0],
+      ["08:00", 3, 40],
+      ["09:00", 0, 0],
+      ["10:00", 0, 0],
+      ["11:00", 1, 90],
+    ]);
   });
 
-  it("compte par service dans la bonne tranche d'une minute", () => {
-    const { step, buckets } = bucketize([
-      at("2026-10-09T10:00:05Z", "ssh"),
-      at("2026-10-09T10:00:40Z", "http"),
-      at("2026-10-09T10:02:10Z", "ssh"),
-    ]);
-    expect(step).toBe(60_000);
-    expect(buckets.map(({ ssh, http, ftp }) => [ssh, http, ftp])).toEqual([
-      [1, 1, 0],
-      [0, 0, 0],
-      [1, 0, 0],
-    ]);
+  it("couvre toute la période même sans aucune tentative", () => {
+    const slots = fillTimeline([], t("2026-10-14T00:00:00Z"), HOUR, t("2026-10-14T23:59:00Z"));
+    expect(slots).toHaveLength(24);
+    expect(slots.every((slot) => slot.events === 0)).toBe(true);
   });
 
-  it("garde les tranches vides : une accalmie reste visible", () => {
-    const { buckets } = bucketize([at("2026-10-09T10:00:00Z"), at("2026-10-09T10:30:00Z")]);
-    expect(buckets.length).toBe(31);
-    expect(buckets.slice(1, -1).every((b) => b.ssh + b.http + b.ftp === 0)).toBe(true);
+  it("se cale sur les tranches de l'API, même décalées de l'heure ronde", () => {
+    const slots = fillTimeline([point("2026-10-14T08:30:00Z", 2)], t("2026-10-14T07:00:00Z"), HOUR, t("2026-10-14T09:10:00Z"));
+    expect(slots.map((slot) => new Date(slot.start).toISOString().slice(11, 16))).toEqual(["06:30", "07:30", "08:30"]);
+    expect(slots[2].events).toBe(2);
   });
 
-  it("élargit le pas pour ne jamais dépasser 60 tranches", () => {
-    const { step, buckets } = bucketize([at("2026-10-01T00:00:00Z"), at("2026-10-09T00:00:00Z")]);
-    expect(step).toBe(6 * 3_600_000);
-    expect(buckets.length).toBeLessThanOrEqual(60);
+  it("ignore une tranche illisible au lieu de décaler les autres", () => {
+    const slots = fillTimeline(
+      [point("pas une date", 9), point("2026-10-14T01:00:00Z", 1)],
+      t("2026-10-14T00:00:00Z"),
+      HOUR,
+      t("2026-10-14T02:00:00Z"),
+    );
+    expect(slots.map((slot) => slot.events)).toEqual([0, 1, 0]);
   });
 
-  it("ignore un horodatage illisible au lieu de casser la courbe", () => {
-    const { buckets } = bucketize([
-      at("2026-10-09T10:00:00Z", "ssh"),
-      at("pas une date", "ftp"),
-      at("2026-10-09T10:01:00Z", "http"),
-    ]);
-    expect(buckets.map(({ ssh, http, ftp }) => [ssh, http, ftp])).toEqual([
-      [1, 0, 0],
-      [0, 1, 0],
-    ]);
+  it("chaque période reste sous le plafond de 1 000 tranches de l'API", () => {
+    for (const period of PERIODS) {
+      expect((period.hours * 60) / period.bucketMinutes).toBeLessThanOrEqual(1000);
+    }
   });
 });
