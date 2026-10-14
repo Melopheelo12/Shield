@@ -22,6 +22,10 @@ UI_PORT="${UI_PORT:-5173}"
 RATE="${RATE:-3}"
 STORAGE="${SHIELD_STORAGE:-memory}"
 TOKEN="dev-token"
+# Compte de développement du tableau de bord (US-19), pour ce lancement local
+# seulement : en production, ADMIN_PASSWORD vient du .env.
+ADMIN_USER="admin"
+ADMIN_PASS="dev-admin"
 
 die() { echo "ERREUR : $*" >&2; exit 1; }
 
@@ -50,6 +54,7 @@ trap cleanup EXIT INT TERM
 
 echo "==> Collecteur sur :$API_PORT (stockage : $STORAGE)"
 INGEST_TOKEN="$TOKEN" SHIELD_STORAGE="$STORAGE" SHIELD_ENV=dev \
+  ADMIN_USERNAME="$ADMIN_USER" ADMIN_PASSWORD="$ADMIN_PASS" \
   .venv/bin/uvicorn shield.collector.api.app:app --port "$API_PORT" --log-level warning &
 pids+=($!)
 
@@ -64,7 +69,7 @@ echo "==> Attaques factices : $RATE par seconde"
   --url "http://localhost:$API_PORT/api/v1/ingest" >/dev/null 2>&1 &
 pids+=($!)
 
-echo "==> Tableau de bord sur http://localhost:$UI_PORT"
+echo "==> Tableau de bord sur http://localhost:$UI_PORT (connexion : $ADMIN_USER / $ADMIN_PASS)"
 (cd dashboard && exec npx vite --port "$UI_PORT" --strictPort --clearScreen false) &
 pids+=($!)
 
