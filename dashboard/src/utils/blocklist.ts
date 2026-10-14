@@ -22,6 +22,16 @@ export function isIp(value: string): boolean {
   return IPV6.test(value) && value.includes(":") && (value.match(/::/g) ?? []).length <= 1;
 }
 
+/**
+ * Lit la liste de `GET /api/v1/blocklist` (une adresse par ligne). Les lignes qui ne
+ * sont pas une adresse sont écartées et comptées : jamais collées dans un terminal.
+ */
+export function parseBlocklist(text: string): { ips: string[]; rejected: number } {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const ips = [...new Set(lines.filter(isIp))];
+  return { ips, rejected: lines.filter((line) => !isIp(line)).length };
+}
+
 /** Commandes de blocage pour les adresses valides ; les autres sont ignorées. */
 export function buildBlocklist(ips: string[], format: BlocklistFormat): string {
   const valid = [...new Set(ips.filter(isIp))];
