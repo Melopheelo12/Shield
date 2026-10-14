@@ -55,7 +55,7 @@ Le script :
 | Exigence | Ce qui est fait |
 | --- | --- |
 | SSH d'admin sur clé, port décalé, mot de passe désactivé | `sshd` sur `ADMIN_SSH_PORT`, `PasswordAuthentication no`, `PermitRootLogin no`, `AllowUsers`, configuration validée par `sshd -t` avant tout redémarrage. Le port 22 est libéré pour le leurre. |
-| Pare-feu : 22, 80, 21 et le port d'admin | `ufw` refuse tout le reste en entrée. **Docker contourne `ufw`** pour les ports publiés : une chaîne `DOCKER-USER` bloque aussi tout port de conteneur autre que 22/80/21 (le 8443 de nginx n'est donc joignable que par tunnel SSH). |
+| Pare-feu : 22, 80, 21, 443 et le port d'admin | `ufw` refuse tout le reste en entrée. **Docker contourne `ufw`** pour les ports publiés : une chaîne `DOCKER-USER` bloque aussi tout port de conteneur autre que 22/80/21/443 (le 8443 de nginx n'est donc joignable que par tunnel SSH). |
 | Mises à jour de sécurité automatiques | `unattended-upgrades` limité à la source `-security`, redémarrage auto à 04:30 si nécessaire (les conteneurs repartent : `restart: unless-stopped`). |
 | Aucun secret sur la machine | Aucune clé privée créée ; `AllowAgentForwarding no` (personne ne peut réutiliser l'agent SSH d'un admin connecté) ; le script **échoue** s'il trouve une clé privée dans `/root` ou `/home`. Le `.env` est créé en `600`. |
 
@@ -82,7 +82,54 @@ docker compose exec collector python -c \
 
 **J4 est atteint** quand `events` > 0 avec une IP source qui n'est pas la nôtre.
 
-> Les ports 22, 80 et 21 sont publiés par le relais `edge` (ADR 008, #67), qui
+> Les ports 22, 80, 21 et 443 sont publiés par le relais `edge` (ADR 008, #67), qui
 > transmet l'adresse réelle de l'attaquant aux leurres par PROXY protocol. Sur le
 > VPS, vérifier que `source_ip` en base est bien celle du client et non celle du
 > relais : c'est ce qui permettra de fermer #52.
+
+## 6. Domaine, certificat et leurre HTTPS
+
+Un domaine attire davantage de trafic : dès l'émission du certificat, les journaux
+Certificate Transparency l'annoncent et les scanners arrivent en quelques heures. Le
+même certificat sert au tableau de bord (8443) et au leurre HTTPS (443), dont le
+relais `edge` termine le TLS avant de relayer le flux en clair au leurre HTTP.
+
+**L'ordre compte :** sans certificat dans le volume `certs`, le relais `edge` refuse
+de démarrer, ce qui coupe **tous** les leurres. Obtenir le certificat avant
+`docker compose up`.
+
+1. Faire pointer un enregistrement DNS `A` du domaine vers l'IP du VPS.
+2. Obtenir le certificat. Le port 80 appartient au leurre : on arrête le relais le
+   temps de la validation (HTTP-01), dans le volume que lisent `edge` et `nginx`.
+
+```bash
+DOMAIN=exemple.fr            # le vrai domaine
+ADMIN_EMAIL=vous@exemple.fr  # avis d'expiration de Let's Encrypt
+docker compose stop edge
+docker run --rm -p 80:80 -v shield_certs:/etc/letsencrypt certbot/certbot:v2.11.0 \
+  certonly --standalone --non-interactive --agree-tos -m "$ADMIN_EMAIL" \
+  -d "$DOMAIN" --cert-name shield
+docker compose up -d edge nginx
+```
+
+3. Vérifier :
+
+```bash
+curl -k "https://$DOMAIN/wp-login.php"     # page du leurre, et un événement en base
+openssl s_client -connect "$DOMAIN:443" -servername "$DOMAIN" </dev/null | grep subject
+```
+
+4. Renouvellement (certificats de 90 jours), par exemple chaque lundi à 4 h dans la
+   crontab de root (adapter le chemin du dépôt) :
+
+```bash
+0 4 * * 1  cd /opt/Shield && docker compose stop edge && docker run --rm -p 80:80 -v shield_certs:/etc/letsencrypt certbot/certbot:v2.11.0 renew --standalone --quiet; docker compose start edge && docker compose exec nginx nginx -s reload
+```
+
+Le volume s'appelle `shield_certs` quand le dépôt est cloné dans un dossier `Shield`
+(nom du projet Compose) : `docker volume ls | grep certs` pour le vérifier.
+
+Le leurre HTTPS enregistre ses événements comme le leurre HTTP (`service = http`,
+`dest_port = 8080`) : les distinguer demanderait au leurre de lire le port de
+destination de l'en-tête PROXY.
+
