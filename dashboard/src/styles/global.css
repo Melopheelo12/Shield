@@ -198,6 +198,12 @@ button:disabled {
 
 /* ------------------------------------------------------------------- statut */
 
+.statuses {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -216,6 +222,10 @@ button:disabled {
 .status--ok .status__dot {
   background: var(--sev-low);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--sev-low) 20%, transparent);
+}
+
+.status--pending .status__dot {
+  background: var(--sev-medium);
 }
 
 .status--down {
