@@ -104,6 +104,15 @@ _RULE_COLUMNS = (
 )
 
 
+def _fsync(path: Path) -> None:
+    """Force l'écriture d'un fichier — ou d'une entrée de dossier — sur le disque."""
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _pg_text(value: str) -> str:
     """Rend une chaîne fournie par un attaquant acceptable pour une colonne texte.
 
@@ -500,9 +509,15 @@ class PostgresEventRepository:
     async def archive_partitions(self, before: date, directory: Path) -> list[dict[str, Any]]:
         """Archive puis supprime chaque partition mensuelle entièrement antérieure à ``before``.
 
-        Ordre de sûreté : le fichier est écrit sous un nom temporaire, puis renommé ; le
-        nombre de lignes copiées est comparé à celui de la partition **dans la même
-        transaction que le DROP**. Au moindre écart, rien n'est supprimé.
+        Ordre de sûreté :
+
+        1. le fichier est écrit sous un nom temporaire, synchronisé sur le disque
+           (``fsync``), puis renommé ; le dossier est synchronisé à son tour (#100) ;
+        2. la partition est verrouillée en ``SHARE`` **avant** le comptage : une insertion
+           en cours fait attendre le verrou, puis compte — sans ce verrou, une ligne
+           validée entre le comptage et le ``DROP`` disparaissait sans être archivée ;
+        3. le nombre de lignes copiées est comparé à celui de la partition, dans la même
+           transaction que le ``DROP``. Au moindre écart, rien n'est supprimé.
         """
         async with self._sessions() as db:
             eligible = [name for name, _, end in await self._event_partitions(db) if end <= before]
@@ -511,6 +526,8 @@ class PostgresEventRepository:
             path = directory / f"{name}.csv.gz"
             copied, digest = await self._copy_partition(name, path)
             async with self._sessions.begin() as db:
+                # Nom vérifié par _PARTITION_NAME : aucune donnée externe dans ces requêtes.
+                await db.execute(text(f'LOCK TABLE "{name}" IN SHARE MODE'))
                 count_sql = f'SELECT count(*) FROM "{name}"'  # noqa: S608  # nosec B608
                 rows = (await db.execute(text(count_sql))).scalar_one()
                 if rows != copied:
@@ -532,7 +549,10 @@ class PostgresEventRepository:
                 "archived_at": datetime.now(UTC).isoformat(),
                 "file": path.name,
             }
-            (directory / f"{name}.json").write_text(json.dumps(manifest, indent=2), "utf-8")
+            manifest_path = directory / f"{name}.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2), "utf-8")
+            _fsync(manifest_path)
+            _fsync(directory)
             archived.append(manifest)
             logger.info("partition %s archivée : %s lignes → %s", name, rows, path)
         return archived
@@ -559,7 +579,10 @@ class PostgresEventRepository:
         with temporary.open("rb") as written:
             for block in iter(lambda: written.read(1 << 20), b""):
                 digest.update(block)
+        # Sur le disque avant le renommage, et le renommage lui-même avant le DROP (#100).
+        _fsync(temporary)
         os.replace(temporary, path)
+        _fsync(path.parent)
         return int(str(status).split()[-1]), digest.hexdigest()
 
     async def storage_usage(self) -> list[dict[str, Any]]:

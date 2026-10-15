@@ -1,5 +1,6 @@
 """Le collecteur branché sur PostgreSQL (S1-06) : écriture, relecture, agrégats, chaîne complète."""
 
+import asyncio
 import csv
 import dataclasses
 import gzip
@@ -320,6 +321,44 @@ async def test_archivage_des_mois_anciens(repository, pg_engine, tmp_path):
         pg_engine, "SELECT count(*) FROM retention_job WHERE partition = 'archive:event_2025_01'"
     )
     assert logged == 1
+
+
+async def test_une_insertion_concurrente_empeche_l_archivage(repository, pg_engine, tmp_path):
+    """#100 : une ligne validée pendant l'archivage n'est jamais supprimée sans être archivée.
+
+    Une autre connexion insère dans le mois archivé sans valider. L'archivage copie le
+    mois, puis doit attendre le verrou : la ligne, une fois validée, est comptée, l'écart
+    est vu, et la partition reste en place. Sans le verrou SHARE, le comptage ignorait la
+    ligne non validée et le DROP l'emportait avec la partition.
+    """
+    await repository.maintain(today=date(2025, 1, 15))
+    for day in (3, 17):
+        await capture(repository, occurred_at=datetime(2025, 1, day, tzinfo=UTC))
+
+    async with pg_engine.connect() as other:
+        columns = (
+            await other.execute(
+                text(
+                    "SELECT string_agg(quote_ident(column_name), ',') "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = 'event' "
+                    "AND column_name <> 'id'"
+                )
+            )
+        ).scalar_one()
+        await other.execute(
+            text(f"INSERT INTO event ({columns}) SELECT {columns} FROM event_2025_01 LIMIT 1")
+        )  # transaction ouverte, non validée
+
+        archiving = asyncio.create_task(repository.archive_partitions(date(2025, 2, 1), tmp_path))
+        await asyncio.sleep(1.5)
+        assert not archiving.done(), "l'archivage doit attendre la fin de l'insertion"
+        await other.commit()
+
+    archived = await asyncio.wait_for(archiving, timeout=15)
+    assert archived == [], "écart détecté : rien n'est supprimé"
+    [rows] = await fetch_one(pg_engine, "SELECT count(*) FROM event_2025_01")
+    assert rows == 3, "la ligne concurrente est toujours là"
 
 
 async def test_allegement_et_mesure_du_stockage(repository):
