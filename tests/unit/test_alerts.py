@@ -125,10 +125,15 @@ def test_un_seuil_invalide_est_refuse(data):
         Threshold.from_dict(data)
 
 
-def test_le_lien_mene_a_la_vue_filtree():
-    critical = Threshold("critique", Metric.MAX_THREAT_SCORE, threshold=80, window_seconds=300)
-    url = filtered_view_url("https://shield.example:8443/", critical)
-    assert url == "https://shield.example:8443/?since_seconds=300&min_score=80"
+@pytest.mark.parametrize(
+    "window,period",
+    [(60, "1h"), (3_600, "1h"), (3_601, "24h"), (86_400, "24h")],  # fenêtre ≤ 24 h
+)
+def test_le_lien_mene_au_journal_filtre_sur_une_periode_connue_du_front(window, period):
+    """#95 : seuls ``?periode=`` et ``#/journal`` sont compris par le tableau de bord."""
+    threshold = Threshold("critique", Metric.MAX_THREAT_SCORE, threshold=80, window_seconds=window)
+    url = filtered_view_url("https://shield.example/", threshold)
+    assert url == f"https://shield.example/?periode={period}#/journal"
 
 
 # --------------------------------------------------------------------------- canaux
@@ -181,7 +186,7 @@ async def test_le_message_discord_contient_regle_valeur_et_lien():
 
     assert "volume" in captured["content"]
     assert "3" in captured["content"]
-    assert "https://shield.example:8443/?since_seconds=60" in captured["content"]
+    assert "https://shield.example:8443/?periode=1h#/journal" in captured["content"]
     assert captured["allowed_mentions"] == {"parse": []}, "jamais de @everyone"
 
 

@@ -108,13 +108,21 @@ class AlertNotice:
         )
 
 
+#: Périodes que le journal du tableau de bord sait filtrer (dashboard/src/utils/constants.ts),
+#: de la plus courte à la plus longue.
+DASHBOARD_PERIODS = (("1h", 3_600), ("24h", 86_400), ("7d", 7 * 86_400), ("30d", 30 * 86_400))
+
+
 def filtered_view_url(dashboard_url: str, threshold: Threshold) -> str:
-    """Lien vers la vue déjà filtrée : les événements de la fenêtre, les plus graves d'abord."""
-    base = dashboard_url.rstrip("/")
-    query = f"since_seconds={threshold.window_seconds}"
-    if threshold.metric is Metric.MAX_THREAT_SCORE:
-        query += f"&min_score={int(threshold.threshold)}"
-    return f"{base}/?{query}"
+    """Lien vers le journal, filtré sur la plus courte période qui couvre la fenêtre du seuil.
+
+    Le lien n'utilise que des filtres que le front sait lire (``?periode=`` et la route
+    ``#/journal``) : un paramètre qu'il ignore ouvrirait une vue non filtrée (#95).
+    """
+    period = next(
+        (key for key, seconds in DASHBOARD_PERIODS if threshold.window_seconds <= seconds), "30d"
+    )
+    return f"{dashboard_url.rstrip('/')}/?periode={period}#/journal"
 
 
 @dataclass
