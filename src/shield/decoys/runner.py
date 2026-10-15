@@ -12,6 +12,7 @@ import logging
 import os
 
 from shield.decoys import FTPDecoy, HTTPDecoy, SSHDecoy
+from shield.decoys.base import parse_public_ports
 
 DECOYS = {"ssh": SSHDecoy, "http": HTTPDecoy, "ftp": FTPDecoy}
 DEFAULT_PORTS = {"ssh": 22, "http": 80, "ftp": 21}
@@ -30,6 +31,8 @@ async def main_async(args: argparse.Namespace) -> None:
         ingest_token=os.getenv("INGEST_TOKEN", "change-me-ingest-token"),
         banner=args.banner,
         proxy_protocol=args.proxy_protocol,
+        # Ports internes du relais → ports publics attaqués (ex. « 4443=443,8080=80 »).
+        public_ports=parse_public_ports(os.getenv("DECOY_PUBLIC_PORTS", "")),
     )
     try:
         await decoy.serve_forever()
