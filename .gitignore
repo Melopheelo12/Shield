@@ -20,3 +20,7 @@ geolite2/
 
 # Artefacts de build
 *.egg-info/
+
+# Parcours de bout en bout (Playwright)
+dashboard/playwright-report/
+dashboard/test-results/
