@@ -50,3 +50,48 @@ export function saveScorecard(card: Scorecard): void {
     // Navigation privée ou stockage plein : la grille reste valable pour la session.
   }
 }
+
+const START_KEY = "shield.sandbox.debut";
+
+/** Début de la partie en cours (ISO 8601), ou `null` si aucune mesure n'est lancée. */
+export function loadGameStart(): string | null {
+  try {
+    const value = window.localStorage.getItem(START_KEY);
+    return value && Number.isFinite(Date.parse(value)) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveGameStart(start: string | null): void {
+  try {
+    if (start) window.localStorage.setItem(START_KEY, start);
+    else window.localStorage.removeItem(START_KEY);
+  } catch {
+    // Stockage indisponible : la mesure vaut pour cette page seulement.
+  }
+}
+
+/** Réponse de `GET /api/v1/sandbox/report` (US-37). */
+export interface SandboxReport {
+  since: string | null;
+  events: number;
+  detected: number;
+  detection_rate: number | null;
+  target: number;
+  target_met: boolean;
+  by_service: Record<string, number>;
+  missed_by_technique: { technique: string; events: number }[];
+}
+
+/** Verdict d'une partie face à l'objectif de détection (80 %). */
+export function reportVerdict(report: SandboxReport): { tone: "ok" | "down" | "pending"; text: string } {
+  if (report.detection_rate === null) return { tone: "pending", text: "Aucune tentative depuis le début de la partie." };
+  if (report.target_met) {
+    return { tone: "ok", text: `Objectif atteint : ${report.detection_rate} % détectées (objectif ${report.target} %).` };
+  }
+  return {
+    tone: "down",
+    text: `Objectif manqué : ${report.detection_rate} % détectées, il en faut ${report.target} %.`,
+  };
+}
