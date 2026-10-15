@@ -141,7 +141,7 @@ jobs:
             psql -h localhost -U shield -d shield -v ON_ERROR_STOP=1 -f "$script"
           done
       - name: Demarrer le collecteur
-        env: { INGEST_TOKEN: ci-token }
+        env: { INGEST_TOKEN: ci-token, ADMIN_PASSWORD: ci-admin }
         run: |
           uvicorn shield.collector.api.app:app --host 127.0.0.1 --port 8000 &
           for i in $(seq 1 30); do
@@ -154,7 +154,11 @@ jobs:
             --rate 50 --count 3000
       - name: Verifier qu'aucun evenement n'a ete perdu
         run: |
-          COUNT=$(curl -s http://127.0.0.1:8000/api/v1/stats/overview | python -c "import json,sys;print(json.load(sys.stdin)['events'])")
+          TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"ci-admin"}' \
+            | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+          COUNT=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/v1/stats/overview | python -c "import json,sys;print(json.load(sys.stdin)['events'])")
           echo "evenements stockes : $COUNT / 3000"
           test "$COUNT" -eq 3000
 

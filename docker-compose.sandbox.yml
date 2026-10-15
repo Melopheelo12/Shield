@@ -26,6 +26,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://shield:sandbox@sandbox-postgres:5432/shield_sandbox
       REDIS_URL: redis://sandbox-redis:6379/0
       SANDBOX_RUN: "true"
+      ADMIN_PASSWORD: sandbox-admin
+      WATCH_ENABLED: "false"   # aucune sortie réseau : pas de veille
+      JWT_SECRET: sandbox-jwt-secret-local-uniquement
     volumes: ["./rules:/app/rules:ro"]
     networks: [sandbox_net]
     # Le collecteur exige le schéma au démarrage (#51) : il attend la base.

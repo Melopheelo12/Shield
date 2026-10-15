@@ -2,6 +2,7 @@ from shield.collector.models.base import Base, dispose_engine, get_engine, sessi
 from shield.collector.models.tables import (
     Alert,
     AlertChannel,
+    AlertThreshold,
     ApiToken,
     AppUser,
     AttackTechnique,
@@ -32,6 +33,7 @@ __all__ = [
     "RuleMatch",
     "AlertChannel",
     "Alert",
+    "AlertThreshold",
     "BlocklistEntry",
     "AppUser",
     "ApiToken",
