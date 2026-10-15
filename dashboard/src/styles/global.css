@@ -892,3 +892,31 @@ button:disabled {
   border-color: var(--sev-critical);
   color: var(--sev-critical);
 }
+
+/* ------------------------------------------------------------------ alertes */
+
+.alert-table input:not([type="checkbox"]),
+.alert-table select {
+  width: 100%;
+  min-width: 90px;
+}
+
+.alert-table td {
+  vertical-align: top;
+}
+
+[aria-invalid="true"] {
+  border-color: var(--sev-critical);
+}
+
+.field-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--sev-critical);
+  font-size: 12px;
+}
+
+/* Zone d'annonce vide : pas d'espace réservé dans la grille. */
+.grid > p[role="status"]:empty {
+  display: none;
+}
