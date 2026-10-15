@@ -7,6 +7,10 @@ aucune tentative n'est perdue, aucun service ne tombe, jamais de 5xx.
 
     python scripts/qa/malicious_inputs.py --api http://localhost:8000
 
+Les routes de consultation exigent un jeton depuis US-19 : le script se connecte
+avec ``--admin-user`` / ``--admin-password`` (par défaut ADMIN_PASSWORD, puis le
+compte de ``make dev``). Un collecteur sans authentification reste accepté.
+
 Les leurres doivent pointer vers le même collecteur. Code de sortie = nombre d'écarts.
 """
 
@@ -15,6 +19,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import socket
 import time
 
@@ -90,6 +95,21 @@ def alive(host: str, port: int) -> bool:
         return False
 
 
+def consultation_headers(api: str, username: str, password: str) -> dict[str, str]:
+    """En-tête ``Authorization`` pour les routes de consultation (US-19).
+
+    Un collecteur antérieur à l'authentification n'a pas de ``/auth/login`` (404) :
+    on consulte alors sans jeton. Un refus des identifiants arrête la recette.
+    """
+    response = httpx.post(
+        f"{api}/api/v1/auth/login", json={"username": username, "password": password}
+    )
+    if response.status_code == 404:
+        return {}
+    response.raise_for_status()
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--api", default="http://localhost:8000")
@@ -98,12 +118,16 @@ def main() -> int:
     parser.add_argument("--ssh", type=int, default=2222)
     parser.add_argument("--http", type=int, default=8080)
     parser.add_argument("--ftp", type=int, default=2121)
+    parser.add_argument("--admin-user", default=os.getenv("ADMIN_USERNAME", "admin"))
+    parser.add_argument("--admin-password", default=os.getenv("ADMIN_PASSWORD", "dev-admin"))
     args = parser.parse_args()
     ports = {"ssh": args.ssh, "http": args.http, "ftp": args.ftp}
     report = Report()
+    auth = consultation_headers(args.api, args.admin_user, args.admin_password)
 
     def count() -> int:
-        return int(httpx.get(f"{args.api}/api/v1/stats/overview").json()["events"])
+        overview = httpx.get(f"{args.api}/api/v1/stats/overview", headers=auth)
+        return int(overview.json()["events"])
 
     # -------------------------------------------------------------- leurres
     before, sent = count(), 0
@@ -127,7 +151,9 @@ def main() -> int:
         f"{sent} tentatives → {stored} événements stockés", stored == sent, f"attendu {sent}"
     )
 
-    recent = httpx.get(f"{args.api}/api/v1/events", params={"limit": max(stored, 1)}).json()
+    recent = httpx.get(
+        f"{args.api}/api/v1/events", params={"limit": max(stored, 1)}, headers=auth
+    ).json()
     events = recent["items"]
     report.check("XSS stocké tel quel (chaîne inerte)", any(XSS in e["username"] for e in events))
     report.check(
