@@ -9,8 +9,7 @@ export function Attacks() {
   const events = useEventsPage(filters);
 
   return (
-    <section className="page" aria-labelledby="attacks-title">
-      <h2 id="attacks-title">Journal des attaques</h2>
+    <section className="grid" aria-label="Journal des attaques">
       <FilterBar filters={filters} onChange={updateFilters} onReset={resetFilters} />
       <EventTable {...events} />
     </section>
