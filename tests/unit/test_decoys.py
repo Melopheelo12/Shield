@@ -76,13 +76,160 @@ def test_analyse_http_ne_leve_jamais(payload):
     assert isinstance(HTTPDecoy.parse_request(payload), dict)
 
 
-def test_la_page_servie_ne_reinjecte_pas_la_saisie():
+def http_decoy(**kwargs) -> HTTPDecoy:
+    return HTTPDecoy(port=80, ingest_url="http://x", ingest_token="t", **kwargs)
+
+
+MARKER = "zq7MARQUEURzq7"
+
+
+@pytest.mark.parametrize(
+    "method,target",
+    [
+        ("GET", f"/?s=<script>{MARKER}</script>"),
+        ("POST", f"/wp-login.php?redirect_to={MARKER}"),
+        ("GET", f"/{MARKER}"),
+        ("GET", f"/wp-admin/{MARKER}"),
+        ("POST", f"/xmlrpc.php?{MARKER}"),
+        ("GET", f"/?author={MARKER}"),
+    ],
+)
+def test_aucune_saisie_n_est_reinjectee(method, target):
     """Un leurre vulnérable au XSS réfléchi serait à la fois ridicule et dangereux."""
-    page = HTTPDecoy.serve_login_page(
-        HTTPDecoy(port=80, ingest_url="http://x", ingest_token="t")
-    ).decode()
-    assert "<script>" not in page.replace("<script>alert", "")
-    assert "value=" not in page
+    assert MARKER.encode() not in http_decoy().render(method, target)
+
+
+def test_la_page_de_connexion_ne_contient_aucun_script():
+    page = http_decoy().serve_login_page().decode()
+    assert "<script" not in page.lower()
+
+
+def status_of(response: bytes) -> str:
+    return response.split(b"\r\n", 1)[0].decode()
+
+
+@pytest.mark.parametrize(
+    "method,target,status,needle",
+    [
+        ("GET", "/", "200 OK", b'content="WordPress 5.8.3"'),
+        ("GET", "/index.php", "200 OK", b"Menuiserie des Tilleuls"),
+        ("GET", "/wp-login.php", "200 OK", b'name="log"'),
+        ("POST", "/wp-login.php", "200 OK", b"login_error"),
+        ("GET", "/wp-admin/", "302 Found", b"Location: /wp-login.php?redirect_to="),
+        ("GET", "/xmlrpc.php", "405 Method Not Allowed", b"POST requests only"),
+        ("POST", "/xmlrpc.php", "200 OK", b"<int>403</int>"),
+        ("GET", "/readme.html", "200 OK", b"Version 5.8.3"),
+        ("GET", "/robots.txt", "200 OK", b"Disallow: /wp-admin/"),
+        ("GET", "/?author=1", "301 Moved Permanently", b"Location: /author/atelier/"),
+        ("GET", "/wp-json/wp/v2/users", "200 OK", b'"slug":"atelier"'),
+        ("GET", "/wp-json/", "200 OK", b'"namespaces"'),
+        ("GET", "/.env", "404 Not Found", b"Rien de trouv"),
+        ("GET", "/phpmyadmin/", "404 Not Found", b"error404"),
+        ("GET", "/nimporte-quoi", "404 Not Found", b"error404"),
+    ],
+)
+def test_le_site_repond_comme_wordpress(method, target, status, needle):
+    """Un serveur qui répond 200 et la même page partout est la signature d'un honeypot."""
+    response = http_decoy().render(method, target)
+    assert status_of(response) == f"HTTP/1.1 {status}"
+    assert needle in response
+
+
+def test_en_tetes_et_signatures_de_version():
+    response = http_decoy().render("GET", "/")
+    head = response.split(b"\r\n\r\n", 1)[0].decode()
+    assert "Server: nginx/1.18.0" in head
+    assert "X-Powered-By: PHP/7.4.33" in head
+    length = int(
+        next(line for line in head.splitlines() if line.startswith("Content-Length")).split()[1]
+    )
+    assert length == len(response.split(b"\r\n\r\n", 1)[1])
+    assert "Server: Apache" in http_decoy(banner="Apache").render("GET", "/").decode()
+
+
+def test_head_n_envoie_pas_de_corps():
+    response = http_decoy().render("HEAD", "/")
+    assert response.endswith(b"\r\n\r\n")
+    assert b"Content-Length: 0" not in response
+
+
+def test_le_nom_du_site_est_configurable_et_echappe(monkeypatch):
+    monkeypatch.setenv("DECOY_HTTP_SITE_NAME", "Atelier <b>Test</b>")
+    page = http_decoy().render("GET", "/").decode()
+    assert "Atelier &lt;b&gt;Test&lt;/b&gt;" in page
+    assert "<b>Test</b>" not in page
+
+
+@pytest.mark.parametrize(
+    "method,target",
+    [(m, t) for m in ("GET", "POST", "HEAD") for t in ("/", "/wp-login.php", "/x", "/xmlrpc.php")],
+)
+def test_aucune_reponse_ne_trahit_le_leurre(method, target):
+    """Le test statique ci-dessus lit le code ; celui-ci lit ce qui part réellement."""
+    response = http_decoy().render(method, target).lower()
+    for needle in (b"honeypot", b"leurre", b"shield", b"decoy"):
+        assert needle not in response
+
+
+@pytest.mark.parametrize(
+    "request_bytes,expected",
+    [
+        (
+            b"POST /wp-login.php HTTP/1.1\r\n\r\nlog=admin&pwd=Passw0rd%21&wp-submit=Se+connecter",
+            ("admin", "Passw0rd!"),
+        ),
+        (b"POST /login HTTP/1.1\r\n\r\nusername=root&password=toor", ("root", "toor")),
+        (
+            b'POST /xmlrpc.php HTTP/1.1\r\n\r\n<?xml version="1.0"?><methodCall>'
+            b"<methodName>wp.getUsersBlogs</methodName><params>"
+            b"<param><value><string>editor</string></value></param>"
+            b"<param><value><string>123456</string></value></param></params></methodCall>",
+            ("editor", "123456"),
+        ),
+        (
+            b"GET /wp-admin/ HTTP/1.1\r\nAuthorization: Basic YWRtaW46c2VjcmV0\r\n\r\n",
+            ("admin", "secret"),
+        ),
+        (b"GET /wp-admin/ HTTP/1.1\r\nAuthorization: Basic !!!\r\n\r\n", ("", "")),
+        (b'POST /xmlrpc.php HTTP/1.1\r\n\r\n<?xml version="1.0"?><methodCall/>', ("", "")),
+    ],
+)
+def test_identifiants_wordpress_xmlrpc_et_basic(request_bytes, expected):
+    parsed = HTTPDecoy.parse_request(request_bytes)
+    assert (parsed.get("username", ""), parsed.get("password", "")) == expected
+
+
+async def test_une_vraie_connexion_au_leurre_http():
+    """De bout en bout : requête TCP réelle, réponse WordPress, événement émis."""
+    emitted: list[dict] = []
+    received = asyncio.Event()
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        emitted.append(json.loads(request.content))
+        received.set()
+        return httpx.Response(202)
+
+    decoy = HTTPDecoy(
+        port=0,
+        ingest_url="http://collector/api/v1/ingest",
+        ingest_token="t",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(capture)),
+    )
+    await decoy.start()
+    try:
+        port = decoy._server.sockets[0].getsockname()[1]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"POST /wp-login.php HTTP/1.1\r\nHost: x\r\n\r\nlog=admin&pwd=admin")
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(), timeout=5)
+        await asyncio.wait_for(received.wait(), timeout=5)
+        writer.close()
+    finally:
+        await decoy.stop()
+    assert status_of(response) == "HTTP/1.1 200 OK"
+    assert b"login_error" in response
+    [event] = emitted
+    assert (event["service"], event["username"], event["password"]) == ("http", "admin", "admin")
 
 
 async def ftp_session(*packets: bytes) -> tuple[dict, bytes]:
