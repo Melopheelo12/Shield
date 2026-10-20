@@ -122,6 +122,28 @@ def _evaluate(node: dict[str, Any], context: dict[str, Any]) -> bool:
     return handler(context.get(field_name), node.get("value"))
 
 
+def _validate(node: Any, rule_id: str) -> None:
+    """Parcourt l'arbre de condition au chargement, pour ne jamais échouer à l'évaluation."""
+    if not isinstance(node, dict):
+        raise RuleError(f"règle {rule_id} : nœud de condition illisible {node!r}")
+    if "all" in node or "any" in node:
+        children = node.get("all", node.get("any"))
+        if not isinstance(children, list) or not children:
+            raise RuleError(f"règle {rule_id} : all / any attend une liste non vide")
+        for child in children:
+            _validate(child, rule_id)
+        return
+    if "not" in node:
+        _validate(node["not"], rule_id)
+        return
+    if not isinstance(node.get("field"), str):
+        raise RuleError(f"règle {rule_id} : condition incomplète {node!r}")
+    if node.get("op") not in OPERATORS:
+        raise RuleError(f"règle {rule_id} : opérateur inconnu {node.get('op')!r}")
+    if node["op"] == "in" and not isinstance(node.get("value"), list):
+        raise RuleError(f"règle {rule_id} : l'opérateur in attend une liste")
+
+
 @dataclass
 class RuleEngine:
     """Charge les règles et les évalue contre un événement enrichi et son contexte."""
@@ -130,28 +152,49 @@ class RuleEngine:
 
     @classmethod
     def from_file(cls, path: str | Path) -> RuleEngine:
-        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or []
-        return cls(rules=[cls._parse(item) for item in raw])
+        """Charge et **valide** tout le fichier : une seule règle invalide le refuse entier."""
+        try:
+            raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or []
+        except yaml.YAMLError as exc:
+            raise RuleError(f"YAML invalide : {exc}") from exc
+        if not isinstance(raw, list):
+            raise RuleError("le fichier de règles doit être une liste")
+        rules = [cls._parse(item) for item in raw]
+        ids = [rule.id for rule in rules]
+        duplicates = sorted({rule_id for rule_id in ids if ids.count(rule_id) > 1})
+        if duplicates:
+            raise RuleError(f"identifiants en double : {duplicates}")
+        return cls(rules=rules)
 
     @staticmethod
-    def _parse(item: dict[str, Any]) -> Rule:
+    def _parse(item: Any) -> Rule:
+        if not isinstance(item, dict):
+            raise RuleError(f"règle illisible : {item!r}")
         required = ("id", "name", "description", "severity", "weight", "condition")
         missing = [key for key in required if key not in item]
+        rule_id = item.get("id", "?")
         if missing:
-            raise RuleError(f"règle {item.get('id', '?')} : champs manquants {missing}")
+            raise RuleError(f"règle {rule_id} : champs manquants {missing}")
         hint = item.get("profile_hint")
-        return Rule(
-            id=item["id"],
-            name=item["name"],
-            description=" ".join(item["description"].split()),
-            severity=Severity(item["severity"]),
-            weight=int(item["weight"]),
-            condition=item["condition"],
-            window_seconds=int(item.get("window_seconds", 0)),
-            profile_hint=AttackerProfile(hint) if hint else None,
-            enabled=bool(item.get("enabled", True)),
-            version=int(item.get("version", 1)),
-        )
+        try:
+            rule = Rule(
+                id=str(item["id"]),
+                name=item["name"],
+                description=" ".join(str(item["description"]).split()),
+                severity=Severity(item["severity"]),
+                weight=int(item["weight"]),
+                condition=item["condition"],
+                window_seconds=int(item.get("window_seconds", 0)),
+                profile_hint=AttackerProfile(hint) if hint else None,
+                enabled=bool(item.get("enabled", True)),
+                version=int(item.get("version", 1)),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuleError(f"règle {rule_id} : {exc}") from exc
+        if not 0 < rule.weight <= MAX_SCORE:
+            raise RuleError(f"règle {rule_id} : poids hors de ]0, {MAX_SCORE}]")
+        _validate(rule.condition, rule.id)
+        return rule
 
     def match(self, context: dict[str, Any]) -> list[Rule]:
         """Règles déclenchées, dans l'ordre stable du fichier (déterminisme)."""

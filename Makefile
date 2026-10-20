@@ -39,7 +39,8 @@ check: lint test-cov  ## Tout ce que la CI vérifie, en local
 	./.venv/bin/python -m shield.tools.gen_ts_types --check
 
 run-api:  ## Lance le collecteur en local (port 8000) ; SHIELD_STORAGE=memory pour se passer de base
-	INGEST_TOKEN=dev-token SHIELD_STORAGE=$(SHIELD_STORAGE) ./.venv/bin/uvicorn shield.collector.api.app:app --reload --port 8000
+	INGEST_TOKEN=dev-token ADMIN_PASSWORD=$${ADMIN_PASSWORD:-dev-admin} \
+	SHIELD_STORAGE=$(SHIELD_STORAGE) ./.venv/bin/uvicorn shield.collector.api.app:app --reload --port 8000
 
 run-decoy:  ## Lance le leurre SSH en local (port 2222, sans privilège)
 	INGEST_TOKEN=dev-token ./.venv/bin/python -m shield.decoys.runner ssh --port 2222

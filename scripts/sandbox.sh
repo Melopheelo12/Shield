@@ -54,8 +54,29 @@ case "${1:-}" in
     if [[ ! -f "$RUN_FILE" ]]; then echo "aucune partie en cours" >&2; exit 1; fi
     started=$(head -1 "$RUN_FILE"); scenario=$(tail -1 "$RUN_FILE")
     echo "Partie demarree le $started (scenario : $scenario)"
-    $COMPOSE exec -T sandbox-collector \
-      python -c "import urllib.request,json;print(json.dumps(json.load(urllib.request.urlopen('http://localhost:8000/api/v1/stats/overview')),indent=2))"
+    # Jeton signé dans le conteneur, avec son propre JWT_SECRET : aucun mot de passe à saisir.
+    $COMPOSE exec -T -e STARTED="$started" sandbox-collector python - <<'PY'
+import json
+import os
+import urllib.parse
+import urllib.request
+
+from shield.collector.api.auth import create_access_token
+
+token, _ = create_access_token("sandbox-report")
+query = urllib.parse.urlencode({"since": os.environ["STARTED"]})
+request = urllib.request.Request(
+    f"http://localhost:8000/api/v1/sandbox/report?{query}",
+    headers={"Authorization": f"Bearer {token}"},
+)
+report = json.load(urllib.request.urlopen(request))  # noqa: S310
+rate = report["detection_rate"]
+print(f"Evenements de l'attaquant : {report['events']}")
+print(f"Detectes par l'agent      : {report['detected']}")
+print(f"Taux de detection         : {rate if rate is not None else '-'} % (objectif {report['target']} %)")
+for missed in report["missed_by_technique"]:
+    print(f"  manque : {missed['technique']} ({missed['events']} evenements)")
+PY
     ;;
   stop)
     $COMPOSE down -v
