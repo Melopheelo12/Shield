@@ -707,3 +707,35 @@ button:disabled {
 .badge--medium { color: var(--sev-medium); background: color-mix(in srgb, var(--sev-medium) 14%, transparent); }
 .badge--high { color: var(--sev-high); background: color-mix(in srgb, var(--sev-high) 14%, transparent); }
 .badge--critical { color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 16%, transparent); }
+
+/* ---------------------------------------------------------------- défense */
+
+.ip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ip-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-bar input[type="range"] {
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.emergency p {
+  margin: 0 0 12px;
+}
+
+.payload--tall {
+  max-height: 320px;
+}
