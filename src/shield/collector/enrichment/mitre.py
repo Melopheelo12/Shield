@@ -20,8 +20,59 @@ TECHNIQUES = {
     "T1078": "Valid Accounts",
 }
 
-_EXPLOIT_MARKERS = (b"../", b"..%2f", b"union select", b"' or '1'='1", b"<script")
-_COMMAND_MARKERS = (b";wget ", b";curl ", b"/bin/sh", b"$((")
+# Mêmes familles de motifs que rules/detection_rules.yaml (R-009, R-010, R-011,
+# R-015, R-016, R-017) : un événement classé « exploitation » ici doit aussi être
+# reconnu par l'agent défenseur, et inversement.
+_COMMAND_MARKERS = (
+    b";wget",
+    b";curl",
+    b"wget+http",
+    b"wget%20http",
+    b"curl+http",
+    b"|sh",
+    b"| sh",
+    b"chmod +x",
+    b"busybox",
+    b"/bin/sh",
+    b"/bin/bash",
+    b"$((",
+)
+#: Vulnérabilités connues (CVE) : exploitation, même quand la forme est une traversée.
+_KNOWN_EXPLOIT_MARKERS = (
+    b"${jndi:",
+    b"() { :;};",
+    b"/.%2e/",
+    b"eval-stdin.php",
+    b"fgt_lang",
+    b"/mgmt/tm/util/bash",
+    b"/vpn/../vpns/",
+    b"/cgi-bin/luci/;stok=",
+    b"connector.minimal.php",
+)
+_DISCOVERY_MARKERS = (
+    b"../",
+    b"..%2f",
+    b"%2e%2e",
+    b"..%5c",
+    b"/.env",
+    b"/.git/",
+    b"wp-config",
+    b"id_rsa",
+    b"/.aws/",
+    b"/.ssh/",
+)
+_EXPLOIT_MARKERS = (
+    b"union select",
+    b"union%20select",
+    b"union+select",
+    b"' or '1'='1",
+    b"%27%20or%20",
+    b"%27+or+",
+    b"information_schema",
+    b"<script",
+    b"%3cscript",
+    b"onerror=",
+)
 
 
 class MitreMapper:
@@ -32,7 +83,9 @@ class MitreMapper:
 
         if any(marker in payload for marker in _COMMAND_MARKERS):
             return "T1059"
-        if b"../" in payload or b"..%2f" in payload:
+        if any(marker in payload for marker in _KNOWN_EXPLOIT_MARKERS):
+            return "T1190"
+        if any(marker in payload for marker in _DISCOVERY_MARKERS):
             return "T1083"
         if any(marker in payload for marker in _EXPLOIT_MARKERS):
             return "T1190"
