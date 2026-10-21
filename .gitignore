@@ -13,6 +13,8 @@ htmlcov/
 .coverage
 node_modules/
 dashboard/dist/
+# Cache de compilation incrémentale de `tsc -b` (npm run build)
+dashboard/*.tsbuildinfo
 data/
 geolite2/
 *.mmdb

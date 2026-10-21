@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ApiError, getJson } from "../api/client";
 
 export type LoadState<T> =
   | { status: "loading" }
@@ -12,21 +13,17 @@ export type LoadState<T> =
  * Les quatre états (chargement, vide, prêt, erreur) sont explicites et non
  * optionnels : ils sont fréquents au démarrage d'une instance neuve et doivent être
  * maquettés, pas improvisés (§ 1.7.2 de la documentation technique).
+ *
+ * Passe par `getJson` : le jeton d'accès est ajouté, et un 401 ramène à la connexion.
  */
 export function useApi<T>(path: string, intervalMs = 0): LoadState<T> & { reload: () => void } {
   const [state, setState] = useState<LoadState<T>>({ status: "loading" });
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch(path, { headers: { Accept: "application/json" } });
-      if (!response.ok) {
-        setState({ status: "error", message: `HTTP ${response.status}` });
-        return;
-      }
-      const data = (await response.json()) as T;
-      setState({ status: "ready", data });
+      setState({ status: "ready", data: await getJson<T>(path) });
     } catch (error) {
-      setState({ status: "error", message: String(error) });
+      setState({ status: "error", message: error instanceof ApiError ? error.message : String(error) });
     }
   }, [path]);
 

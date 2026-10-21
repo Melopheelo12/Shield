@@ -58,3 +58,41 @@ export interface Overview {
   max_threat_score: number;
   rejected: number;
 }
+
+export interface TimelinePoint {
+  bucket: string; // début de la tranche, ISO 8601
+  events: number;
+  max_threat_score: number;
+}
+
+export interface CountryCount {
+  country_code: string | null; // null : adresse non située
+  events: number;
+  unique_ips: number;
+}
+
+export interface SessionRule {
+  rule_id: string;
+  name: string;
+  description: string;
+  severity: Severity;
+  weight: number;
+  matches: number;
+  total_contribution: number;
+}
+
+export interface SessionDetail {
+  session_id: string;
+  source_ip: string;
+  service: ServiceName;
+  started_at: string;
+  ended_at: string | null;
+  event_count: number;
+  threat_score: number;
+  attacker_profile: AttackerProfile;
+  closed: boolean;
+  events: NormalizedEvent[];
+  rules: SessionRule[];
+}
+
+export type StreamFrame = { type: "event"; data: NormalizedEvent } | { type: "ping" };

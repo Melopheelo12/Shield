@@ -1,6 +1,11 @@
 """Le collecteur branché sur PostgreSQL (S1-06) : écriture, relecture, agrégats, chaîne complète."""
 
+import asyncio
+import csv
 import dataclasses
+import gzip
+import hashlib
+import json
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -9,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from shield.collector.api import app as api
+from shield.collector.api.auth import create_access_token
 from shield.collector.defender import DefenderAgent, RuleEngine
 from shield.collector.enrichment.mitre import MitreMapper
 from shield.collector.ingest.session_tracker import SessionTracker
@@ -26,8 +32,8 @@ async def repository(pg_engine):
     return repo
 
 
-async def capture(repository, *, session_id: UUID | None = None, **fields):
-    """Le chemin d'ingestion de l'API, sans HTTP."""
+async def capture(repository, *, session_id: UUID | None = None, geo: dict | None = None, **fields):
+    """Le chemin d'ingestion de l'API, sans HTTP. ``geo`` tient lieu de GeoLite2."""
     body = dict(
         service="ssh",
         source_ip="198.51.100.7",
@@ -45,6 +51,7 @@ async def capture(repository, *, session_id: UUID | None = None, **fields):
         session_id=session_id or uuid4(),
         technique_id=MAPPER.map(raw),
         enrichment_status=EnrichmentStatus.PARTIAL,
+        **(geo or {}),
     )
     verdict = AGENT.evaluate(event, counters)
     event = event.model_copy(update={"threat_score": verdict.threat_score})
@@ -136,6 +143,44 @@ async def test_session_et_adresse_sont_agregees(repository, pg_engine):
     assert total == 2
 
 
+async def test_la_geolocalisation_est_conservee_et_jamais_effacee(repository, pg_engine):
+    """S2-01 : une base GeoLite2 plus récente corrige ; une base absente n'efface rien."""
+    await capture(repository, geo={"country_code": "NL", "asn": 64500, "as_org": "Ancien\x00"})
+    await capture(repository, geo={"country_code": "DE", "asn": 64501, "as_org": "Nouveau"})
+    await capture(repository)  # GeoLite2 indisponible pour cet événement
+
+    row = await fetch_one(
+        pg_engine, "SELECT country_code, asn, as_org FROM ip_intel WHERE ip = '198.51.100.7'"
+    )
+    assert tuple(row) == ("DE", 64501, "Nouveau")
+
+    [stored] = await repository.query(country="DE", limit=1)
+    assert (stored.country_code, stored.asn, stored.as_org) == ("DE", 64501, "Nouveau")
+
+
+async def test_la_reputation_differee_est_reprise_puis_close(repository, pg_engine):
+    """S2-03 / S2-05 : les adresses en attente sortent, la réputation les clôt."""
+    now = datetime.now(UTC)
+    await capture(repository, occurred_at=now - timedelta(minutes=5))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=now)
+
+    assert await repository.pending_reputation(10) == ["203.0.113.99", "198.51.100.7"]
+    assert await repository.pending_reputation(1) == ["203.0.113.99"]
+
+    await repository.apply_reputation("198.51.100.7", 91)
+    assert await repository.pending_reputation(10) == ["203.0.113.99"]
+
+    score, checked_at = await fetch_one(
+        pg_engine,
+        "SELECT reputation_score, reputation_checked_at FROM ip_intel WHERE ip = '198.51.100.7'",
+    )
+    assert score == 91 and checked_at is not None
+
+    [stored] = [e for e in await repository.query() if str(e.source_ip) == "198.51.100.7"]
+    assert stored.reputation_score == 91
+    assert stored.enrichment_status == EnrichmentStatus.DONE
+
+
 async def test_les_compteurs_respectent_les_fenetres(repository):
     now = datetime.now(UTC)
     await capture(repository, occurred_at=now - timedelta(hours=2))
@@ -182,6 +227,186 @@ async def test_les_statistiques(repository):
 
     assert [e.service.value for e in await repository.query(service="ftp")] == ["ftp"]
     assert len(await repository.query(limit=2)) == 2
+
+
+async def test_detail_de_session(repository):
+    """S3-04 : les règles d'une session sont agrégées, la plus lourde d'abord."""
+    session_id = uuid4()
+    await capture(repository, session_id=session_id)
+    _, worst = await capture(repository, session_id=session_id, password="toor")
+    await capture(repository)  # autre session, même adresse
+
+    detail = await repository.session_detail(session_id)
+    assert detail["event_count"] == 2 and len(detail["events"]) == 2
+    assert detail["threat_score"] == worst.threat_score
+    rules = {rule["rule_id"]: rule for rule in detail["rules"]}
+    assert rules["R-002"]["matches"] == 2
+    contributions = [rule["total_contribution"] for rule in detail["rules"]]
+    assert contributions == sorted(contributions, reverse=True)
+    assert await repository.session_detail(uuid4()) is None
+
+
+async def test_chronologie_et_pays(repository):
+    base = datetime(2026, 10, 12, 10, 0, tzinfo=UTC)
+    await repository.maintain(today=base.date())
+    await capture(repository, occurred_at=base + timedelta(minutes=5), geo={"country_code": "FR"})
+    await capture(repository, occurred_at=base + timedelta(minutes=50))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=base + timedelta(minutes=70))
+
+    timeline = await repository.timeline(base, timedelta(hours=1))
+    assert [(item["bucket"][:16], item["events"]) for item in timeline] == [
+        ("2026-10-12T10:00", 2),
+        ("2026-10-12T11:00", 1),
+    ]
+    assert await repository.by_country() == [
+        {"country_code": "FR", "events": 2, "unique_ips": 1},
+        {"country_code": None, "events": 1, "unique_ips": 1},
+    ]
+
+
+async def test_export_par_curseur_et_liste_de_blocage(repository):
+    now = datetime.now(UTC)
+    stored = [
+        (await capture(repository, occurred_at=now - timedelta(seconds=10 - i)))[0]
+        for i in range(5)
+    ]
+    first = await repository.export_page(None, None, None, 2)
+    cursor = (first[-1].occurred_at, first[-1].event_id)
+    rest = await repository.export_page(None, None, cursor, 10)
+    assert [e.event_id for e in first + rest] == [e.event_id for e in stored]
+
+    await capture(repository, source_ip="203.0.113.99", username="", password="")
+    hostile = await repository.hostile_ips(min_score=1, since=now - timedelta(days=1))
+    assert hostile[0] == "198.51.100.7"
+
+
+async def test_la_purge_rgpd(repository, pg_engine):
+    """S4-04 : partition expirée supprimée d'un bloc, reste supprimé ligne à ligne, journal."""
+    await repository.maintain(today=date(2025, 1, 15))
+    await capture(repository, occurred_at=datetime(2025, 1, 10, tzinfo=UTC))
+    await capture(repository, source_ip="203.0.113.99", occurred_at=datetime.now(UTC))
+
+    summary = await repository.purge(datetime(2025, 6, 1, tzinfo=UTC))
+    assert summary["event_2025_01"] == 1
+    [exists] = await fetch_one(pg_engine, "SELECT to_regclass('event_2025_01') IS NOT NULL")
+    assert not exists
+    assert [str(e.source_ip) for e in await repository.query()] == ["203.0.113.99"]
+    assert summary["ip_intel"] == 1, "l'adresse disparue avec ses événements"
+    [jobs] = await fetch_one(pg_engine, "SELECT count(*) FROM retention_job")
+    assert jobs >= 2
+
+
+async def test_archivage_des_mois_anciens(repository, pg_engine, tmp_path):
+    """Le mois archivé est lisible seul, vérifié, puis sa partition est supprimée."""
+    await repository.maintain(today=date(2025, 1, 15))
+    for day in (3, 17):
+        await capture(repository, occurred_at=datetime(2025, 1, day, tzinfo=UTC))
+    await capture(repository, occurred_at=datetime.now(UTC))
+
+    archived = await repository.archive_partitions(date(2025, 2, 1), tmp_path)
+    assert [(a["partition"], a["rows"]) for a in archived] == [("event_2025_01", 2)]
+
+    with gzip.open(tmp_path / "event_2025_01.csv.gz", "rt", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 2 and {row["service"] for row in rows} == {"ssh"}
+    manifest = json.loads((tmp_path / "event_2025_01.json").read_text("utf-8"))
+    digest = hashlib.sha256((tmp_path / "event_2025_01.csv.gz").read_bytes()).hexdigest()
+    assert manifest["sha256"] == digest and manifest["rows"] == 2
+    assert not list(tmp_path.glob("*.tmp"))
+
+    [exists] = await fetch_one(pg_engine, "SELECT to_regclass('event_2025_01') IS NOT NULL")
+    assert not exists
+    assert len(await repository.query()) == 1, "le mois courant n'est pas touché"
+    [logged] = await fetch_one(
+        pg_engine, "SELECT count(*) FROM retention_job WHERE partition = 'archive:event_2025_01'"
+    )
+    assert logged == 1
+
+
+async def test_une_insertion_concurrente_empeche_l_archivage(repository, pg_engine, tmp_path):
+    """#100 : une ligne validée pendant l'archivage n'est jamais supprimée sans être archivée.
+
+    Une autre connexion insère dans le mois archivé sans valider. L'archivage copie le
+    mois, puis doit attendre le verrou : la ligne, une fois validée, est comptée, l'écart
+    est vu, et la partition reste en place. Sans le verrou SHARE, le comptage ignorait la
+    ligne non validée et le DROP l'emportait avec la partition.
+    """
+    await repository.maintain(today=date(2025, 1, 15))
+    for day in (3, 17):
+        await capture(repository, occurred_at=datetime(2025, 1, day, tzinfo=UTC))
+
+    async with pg_engine.connect() as other:
+        columns = (
+            await other.execute(
+                text(
+                    "SELECT string_agg(quote_ident(column_name), ',') "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = 'event' "
+                    "AND column_name <> 'id'"
+                )
+            )
+        ).scalar_one()
+        await other.execute(
+            text(f"INSERT INTO event ({columns}) SELECT {columns} FROM event_2025_01 LIMIT 1")
+        )  # transaction ouverte, non validée
+
+        archiving = asyncio.create_task(repository.archive_partitions(date(2025, 2, 1), tmp_path))
+        await asyncio.sleep(1.5)
+        assert not archiving.done(), "l'archivage doit attendre la fin de l'insertion"
+        await other.commit()
+
+    archived = await asyncio.wait_for(archiving, timeout=15)
+    assert archived == [], "écart détecté : rien n'est supprimé"
+    [rows] = await fetch_one(pg_engine, "SELECT count(*) FROM event_2025_01")
+    assert rows == 3, "la ligne concurrente est toujours là"
+
+
+async def test_allegement_et_mesure_du_stockage(repository):
+    old, _ = await capture(
+        repository,
+        occurred_at=datetime.now(UTC) - timedelta(days=40),
+        payload=b"GET /.env HTTP/1.1",
+    )
+    recent, _ = await capture(repository, payload=b"GET / HTTP/1.1")
+    assert await repository.lighten_payloads(datetime.now(UTC) - timedelta(days=30)) == 1
+    stored = {e.event_id: e for e in await repository.query()}
+    assert stored[old.event_id].payload == b""
+    assert stored[old.event_id].payload_sha256 == old.payload_sha256
+    assert stored[recent.event_id].payload == b"GET / HTTP/1.1"
+
+    tables = {row["table"] for row in await repository.storage_usage()}
+    assert {"ip_intel", "session", "rule_match"} <= tables
+
+
+async def test_seuils_et_historique_des_alertes(repository):
+    thresholds = [
+        {
+            "id": "volume",
+            "metric": "events",
+            "threshold": 200.0,
+            "window_seconds": 300,
+            "silence_seconds": 3600,
+            "enabled": True,
+        }
+    ]
+    assert await repository.load_alert_thresholds() == []
+    await repository.save_alert_thresholds(thresholds)
+    assert await repository.load_alert_thresholds() == thresholds
+
+    when = datetime.now(UTC)
+    await repository.record_alert(
+        {
+            "threshold_id": "volume",
+            "triggered_at": when,
+            "value": 250.0,
+            "threshold": 200.0,
+            "status": "sent",
+            "channels": {"discord": "sent"},
+        }
+    )
+    [alert] = await repository.recent_alerts()
+    assert alert["threshold_id"] == "volume" and alert["value"] == 250.0
+    assert alert["channels"] == {"discord": "sent"}
 
 
 async def test_un_identifiant_hostile_ne_bloque_pas_l_ecriture(repository):
@@ -272,9 +497,12 @@ async def test_une_session_survit_au_redemarrage_du_collecteur(repository, pg_en
 async def test_chaine_complete_ingestion_vers_verdict(repository):
     api.app.state.repository = repository
     headers = {"X-Ingest-Token": api.INGEST_TOKEN}
+    token, _ = create_access_token("admin")
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=api.app), base_url="http://test"
+            transport=ASGITransport(app=api.app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {token}"},
         ) as client:
             body = dict(
                 service="ssh",

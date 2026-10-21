@@ -16,6 +16,8 @@ la soutenance — le jury demandera *pourquoi*, pas seulement *quoi*.
 | [006](006-docker-compose.md) | Docker Compose plutôt que Kubernetes | Accepté |
 | [007](007-ecrire-avant-enrichir.md) | Écrire en base avant d'enrichir | Accepté |
 | [008](008-relais-d-entree-des-leurres.md) | Exposer les leurres par un relais d'entrée et le PROXY protocol | **Proposé** |
+| [009](009-authentification-compte-unique.md) | Authentification : un compte unique défini dans l'environnement | **Proposé** |
+| [010](010-alertes-en-memoire.md) | Alertes : fenêtres glissantes en mémoire et machine à états par seuil | **Proposé** |
 
 ## Modèle
 
