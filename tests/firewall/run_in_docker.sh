@@ -53,7 +53,7 @@ for ip in 10.1.2.3 192.168.1.20 172.20.0.5 100.70.0.1 127.0.0.1 300.1.1.1 1.2.3.
 done
 echo "$set6" | grep -q "2001:db8::5" || fail "IPv6 publique absente"
 echo "$set6" | grep -q "fe80" && fail "fe80::1 ne devait pas être bloquée"
-nft list chain inet shield_defense input | grep -q "tcp dport { 2222, 8443 }" || fail "ports"
+nft list chain inet shield_defense input | grep -q "ct original proto-dst { 2222, 8443 }" || fail "ports"
 nft list set inet shield_defense allow4 | grep -q "10.0.0.0/8" || fail "liste blanche"
 
 echo "== trafic réel : l'adresse hostile est coupée, les autres passent"
