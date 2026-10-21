@@ -25,8 +25,12 @@ les attaques simulées ; Ctrl+C arrête tout. Aucun leurre n'est exposé.
 | `#/defense` | Liste de blocage (ufw, iptables, nginx), règles actives, arrêt d'urgence |
 | `#/sandbox` | Déroulé d'une partie d'entraînement et grille de détection |
 
-La carte reste vide tant que la géolocalisation (US-07) n'est pas active côté
-collecteur : la page l'indique au lieu d'afficher une carte trompeuse.
+Toutes les pages exigent une connexion (US-19) : le jeton est gardé le temps de
+l'onglet, et un jeton expiré ou refusé ramène à l'écran de connexion.
+
+La carte reste vide tant que les bases GeoLite2 ne sont pas installées sur le
+collecteur (service `geoipupdate`, profil `geoip` du `.env`) : la page l'indique
+au lieu d'afficher une carte trompeuse.
 
 ## Vérifier
 
