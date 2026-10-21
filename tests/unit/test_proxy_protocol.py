@@ -125,6 +125,28 @@ def test_le_relais_expose_chaque_leurre():
     assert len(edge["ports"]) == len(DECOYS)
 
 
+def test_le_leurre_https_a_son_propre_relais():
+    """ADR 008 : un relais par rayon d'impact. Le certificat n'est monté que dans
+    `edge-tls` : s'il manque, seul le leurre HTTPS tombe, pas SSH, HTTP ni FTP."""
+    edge, tls = COMPOSE["services"]["edge"], COMPOSE["services"]["edge-tls"]
+    assert not any("letsencrypt" in volume for volume in edge.get("volumes", []))
+    assert any("letsencrypt" in volume and volume.endswith(":ro") for volume in tls["volumes"])
+    assert [port.rsplit(":", 1)[1] for port in tls["ports"]] == ["4443"]
+    assert tls["depends_on"] == ["decoy-http"]
+    assert set(tls["networks"]) == {"edge_net", "decoy_net"}
+    assert tls["read_only"] is True and tls["cap_drop"] == ["ALL"]
+    with open("deploy/edge-tls.conf", encoding="utf-8") as handle:
+        directives = [line.split("#")[0].strip() for line in handle]
+    for directive in (
+        "proxy_protocol on;",
+        "proxy_half_close on;",
+        "listen 4443 ssl;",
+        "proxy_pass decoy-http:8080;",
+    ):
+        assert directive in directives
+    assert not any(line.startswith("http") for line in directives)
+
+
 def test_le_relais_ne_coupe_pas_le_leurre_quand_le_client_ferme_son_ecriture():
     """Invariant 1 : un client qui envoie puis ferme son côté écriture (`nc < fichier`)
     doit encore produire un événement. Sans `proxy_half_close`, nginx coupe aussi la
