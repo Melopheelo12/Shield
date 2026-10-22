@@ -1,6 +1,6 @@
 SHIELD_STORAGE ?= postgres
 
-.PHONY: help install dev lint format test test-integration test-cov types check run-api run-decoy fake load clean \
+.PHONY: help install dev e2e lint format test test-integration test-cov types check run-api run-decoy fake load clean \
 	qa qa-load qa-inputs qa-identity qa-egress
 
 help:  ## Affiche cette aide
@@ -53,6 +53,9 @@ fake:  ## Flux d'événements factices vers le collecteur local
 
 load:  ## Test de charge : 3 000 événements en 60 s (objectif F1)
 	./.venv/bin/python -m shield.tools.fake_events --token dev-token --rate 50 --count 3000
+
+e2e:  ## Parcours de bout en bout du tableau de bord (Playwright, pile jetable)
+	./scripts/e2e.sh
 
 qa-load:  ## Recette : 3 000 événements cadencés à 50/s (collecteur sur :8000)
 	./.venv/bin/python scripts/qa/load_paced.py --count 3000 --rate 50
