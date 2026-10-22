@@ -69,7 +69,7 @@ flowchart TB
     COL --> PG
     DEF --> PG
     DEF --> RD
-    ENR -. "sortie par liste blanche" .-> EXT
+    ENR -. "sortie (liste blanche à venir)" .-> EXT
     RD ==>|"WebSocket"| NGX
     PG ==> NGX
     NGX ==> UI
@@ -99,7 +99,7 @@ protocol ([ADR 008](docs/adr/008-relais-d-entree-des-leurres.md)).
 | :--- | :--- | :---: |
 | **Entrée** | Relais `edge` (nginx stream), seul conteneur publié sur les ports des leurres | Réseau ouvert, ne relaie que vers les leurres |
 | **Leurre** | Les trois services exposés | **Aucune** |
-| **Traitement** | Collecteur, enrichisseur, agent défenseur, alertes, veille | Liste blanche |
+| **Traitement** | Collecteur, enrichisseur, agent défenseur, alertes, veille | Ouverte : liste blanche à mettre en place sur le VPS |
 | **Données** | PostgreSQL, Redis | Aucune |
 | **Présentation** | Nginx, tableau de bord | Entrée TLS uniquement |
 
