@@ -323,7 +323,19 @@ button:disabled {
 }
 
 .grid--stats {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+/* Rangée principale + colonne étroite (design : 2fr 1fr), empilée sur mobile. */
+.grid--wide {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .grid--wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .grid--2 {
@@ -332,7 +344,8 @@ button:disabled {
 
 .stat {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  padding: 18px 20px;
 }
 
 .stat__label {
@@ -341,9 +354,28 @@ button:disabled {
 }
 
 .stat__value {
-  font-size: 28px;
-  font-weight: 650;
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+
+.stat__value--danger {
+  color: var(--sev-critical);
+}
+
+.stat__unit {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.stat__hint {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* ---------------------------------------------------------------- filtres */
@@ -464,23 +496,33 @@ button:disabled {
 /* ------------------------------------------------------------------- flux */
 
 .feed {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.feed li {
-  display: grid;
-  grid-template-columns: 74px 52px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+.feed td {
+  font-size: 13px;
 }
 
-.feed li:last-child {
-  border-bottom: 0;
+.feed__attempt {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-soft);
+}
+
+/* Code pays de la source, comme dans le design. */
+.cc {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #1c232d;
+  color: var(--muted-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .feed__new {
@@ -1102,4 +1144,15 @@ button:disabled {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* Panneau dont le contenu (un tableau) va jusqu'aux bords, comme dans le design. */
+.panel--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel--flush .panel__head {
+  padding: 18px 24px 14px;
+  margin: 0;
 }
