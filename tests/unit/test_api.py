@@ -263,10 +263,32 @@ async def test_un_json_tres_imbrique_est_rejete_et_trace_pas_une_erreur_500(clie
         "/api/v1/ingest", content=body, headers={**HEADERS, "Content-Type": "application/json"}
     )
     assert response.status_code == 422
-    assert "input" not in response.text, "la réponse ne renvoie pas l'entrée à l'émetteur"
     [(reason, raw_body)] = repository.rejected
-    assert "service" in reason
+    assert "trop imbriqué" in reason
     assert raw_body.startswith(b'{"username":[[[')
+
+
+async def test_une_erreur_de_validation_ne_renvoie_pas_l_entree(client, repository):
+    """La réponse 422 ne réencode pas l'entrée fautive : c'est elle qui débordait (#54)."""
+    nested = {"service": "telnet", "username": [[[["x"]]]]}
+    response = await client.post("/api/v1/ingest", json=nested, headers=HEADERS)
+    assert response.status_code == 422
+    assert "input" not in response.text
+    assert len(repository.rejected) == 1
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        (b'{"a": 1}', False),
+        (b'{"a": [[[[1]]]]}', False),
+        (b'{"a": [[[[[[[[1]]]]]]]]}', True),
+        (b'{"payload": "[[[[[[[[[[[[[[[[[["}', False),  # crochets dans une chaîne
+        (b'{"a": "\\"}', False),  # antislash échappé, la chaîne se ferme bien
+    ],
+)
+def test_la_profondeur_ignore_les_chaines(body, expected):
+    assert api.json_depth_exceeds(body, 8) is expected
 
 
 async def test_un_corps_trop_volumineux_est_refuse_mais_trace(client, repository):

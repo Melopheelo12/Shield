@@ -71,6 +71,8 @@ INGEST_PATH = "/api/v1/ingest"
 MAX_REJECTION_REASON_CHARS = 1000
 #: Un événement légitime pèse une douzaine de Kio (charge de 8 Kio au plus, en base64).
 MAX_INGEST_BODY_BYTES = 64 * 1024
+#: Un événement légitime n'a qu'un niveau d'objet ; la marge couvre un futur champ composé.
+MAX_INGEST_JSON_DEPTH = 8
 MAINTENANCE_INTERVAL_SECONDS = 86_400
 SESSION_CLOSING_INTERVAL_SECONDS = 60
 ENRICHMENT_INTERVAL_SECONDS = 30
@@ -230,6 +232,35 @@ async def record_rejected(repository: EventRepository, reason: str, raw_body: by
         logger.exception("événement rejeté non tracé")
 
 
+def json_depth_exceeds(body: bytes, limit: int) -> bool:
+    """Vrai si ``body`` imbrique plus de ``limit`` objets ou tableaux (#54).
+
+    Vérifié **avant** le décodage : selon la version de Python, le décodeur JSON
+    déborde (3.12, celle de la production) ou non (3.14), et FastAPI répondait 400
+    ou 500 sans rien tracer. Un simple compteur, qui ignore les crochets placés dans
+    les chaînes, donne le même résultat partout, en une passe sur au plus 64 Kio.
+    """
+    depth = 0
+    in_string = escaped = False
+    for byte in body:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # \
+                escaped = True
+            elif byte == 0x22:  # "
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x5B, 0x7B):  # [ {
+            depth += 1
+            if depth > limit:
+                return True
+        elif byte in (0x5D, 0x7D):  # ] }
+            depth -= 1
+    return False
+
+
 class IngestGuard:
     """Garde du point d'ingestion, **avant** que FastAPI ne lise le corps (#54).
 
@@ -237,7 +268,9 @@ class IngestGuard:
     2. Le corps est plafonné à ``MAX_INGEST_BODY_BYTES`` : au-delà, 413, et le début
        est tracé dans ``event_rejected`` — rejeté, mais jamais perdu. Sans plafond, un
        corps de plusieurs Mo était décodé en entier avant d'être tronqué.
-    3. Le corps lu est rangé dans ``scope["state"]`` pour que le gestionnaire de
+    3. Un corps imbriqué au-delà de ``MAX_INGEST_JSON_DEPTH`` est refusé en 422 et
+       tracé, avant tout décodage (voir ``json_depth_exceeds``).
+    4. Le corps lu est rangé dans ``scope["state"]`` pour que le gestionnaire de
        rejet trace les octets reçus, puis rejoué tel quel à l'application.
     """
 
@@ -270,6 +303,16 @@ class IngestGuard:
                 bytes(body),
             )
             response = JSONResponse({"detail": "request body too large"}, status_code=413)
+            await response(scope, receive, send)
+            return
+
+        if json_depth_exceeds(body, MAX_INGEST_JSON_DEPTH):
+            await record_rejected(
+                scope["app"].state.repository,
+                f"corps JSON trop imbriqué (plus de {MAX_INGEST_JSON_DEPTH} niveaux)",
+                bytes(body),
+            )
+            response = JSONResponse({"detail": "request body too deeply nested"}, status_code=422)
             await response(scope, receive, send)
             return
 
