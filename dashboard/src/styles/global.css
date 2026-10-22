@@ -387,6 +387,17 @@ button:disabled {
   gap: 12px;
 }
 
+.filter-bar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-bar__label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .filter-bar select,
 .filter-bar input:not([type="checkbox"]):not([type="range"]) {
   max-width: 100%;
@@ -1155,4 +1166,55 @@ button:disabled {
 .panel--flush .panel__head {
   padding: 18px 24px 14px;
   margin: 0;
+}
+
+/* ------------------------------------------------------------------ journal */
+
+.stamp {
+  display: grid;
+  line-height: 1.3;
+}
+
+.stamp .muted {
+  font-size: 11px;
+}
+
+.event-table tr.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.event-table td.truncate {
+  max-width: 180px;
+}
+
+.page-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.page-intro > p {
+  margin: 0;
+  padding-top: 8px;
+}
+
+.quick-export {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.quick-export .export-result:empty {
+  display: none;
+}
+
+.filter-bar--card {
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
