@@ -19,6 +19,7 @@ import logging
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from ipaddress import IPv4Address, ip_address
+from typing import NamedTuple
 
 import httpx
 
@@ -38,20 +39,37 @@ _UNKNOWN_PEER = ("0.0.0.0", 0)  # noqa: S104  # nosec B104
 #: Taille maximale d'un en-tête PROXY protocol v1, fin de ligne comprise (spécification).
 PROXY_HEADER_MAX_BYTES = 107
 
-#: Adresse réelle du client de la connexion en cours, transmise par le relais d'entrée.
-#: Une variable de contexte suit chaque connexion (une tâche asyncio chacune) sans
-#: changer la signature des ``handle_connection`` des leurres.
-_proxied_peer: ContextVar[tuple[str, int] | None] = ContextVar("proxied_peer", default=None)
+
+class ProxiedPeer(NamedTuple):
+    """Ce que le relais d'entrée transmet d'une connexion : qui, et vers quel port."""
+
+    source_ip: str
+    source_port: int
+    #: Port sur lequel le relais a reçu la connexion : distingue HTTPS (4443) de HTTP
+    #: (8080) quand les deux mènent au même leurre (#97).
+    dest_port: int
 
 
-def parse_proxy_header(line: bytes) -> tuple[str, int] | None:
-    """Lit un en-tête PROXY protocol v1 et retourne l'adresse et le port source.
+#: Connexion en cours, telle que transmise par le relais d'entrée. Une variable de
+#: contexte suit chaque connexion (une tâche asyncio chacune) sans changer la
+#: signature des ``handle_connection`` des leurres.
+_proxied_peer: ContextVar[ProxiedPeer | None] = ContextVar("proxied_peer", default=None)
+
+
+def _port(field: bytes, label: str) -> int:
+    if not field.isdigit() or not 0 <= int(field) <= 65_535:
+        raise ValueError(f"port {label} invalide")
+    return int(field)
+
+
+def parse_proxy_header(line: bytes) -> ProxiedPeer | None:
+    """Lit un en-tête PROXY protocol v1 : adresse et port source, port de destination.
 
     Les leurres ne sont joignables que par le relais d'entrée (ADR 008), qui préfixe
     chaque connexion de cette ligne : c'est le seul moyen de connaître l'adresse réelle
     de l'attaquant sans exposer le leurre. Retourne ``None`` pour ``PROXY UNKNOWN``.
     Lève ``ValueError`` sur tout écart à la spécification : l'en-tête n'est pas
-    interprété au-delà de ces cinq champs, et rien n'est deviné.
+    interprété au-delà de ces champs, et rien n'est deviné.
     """
     if len(line) > PROXY_HEADER_MAX_BYTES or not line.endswith(b"\r\n"):
         raise ValueError("en-tête PROXY trop long ou non terminé")
@@ -65,9 +83,25 @@ def parse_proxy_header(line: bytes) -> tuple[str, int] | None:
     source = ip_address(fields[2].decode("ascii"))
     if isinstance(source, IPv4Address) != (fields[1] == b"TCP4"):
         raise ValueError("famille d'adresse incohérente")
-    if not fields[4].isdigit() or not 0 <= int(fields[4]) <= 65_535:
-        raise ValueError("port source invalide")
-    return str(source), int(fields[4])
+    return ProxiedPeer(str(source), _port(fields[4], "source"), _port(fields[5], "destination"))
+
+
+def parse_public_ports(spec: str) -> dict[int, int]:
+    """``"4443=443,8080=80"`` → ``{4443: 443, 8080: 80}``.
+
+    Le relais écoute sur des ports internes (sans privilège) ; les événements doivent
+    porter le port public réellement attaqué. Une entrée invalide arrête le leurre au
+    démarrage plutôt que d'enregistrer de faux ports.
+    """
+    mapping: dict[int, int] = {}
+    for entry in filter(None, (part.strip() for part in spec.split(","))):
+        internal, sep, public = entry.partition("=")
+        if not sep:
+            raise ValueError(f"DECOY_PUBLIC_PORTS : entrée invalide {entry!r}")
+        mapping[_port(internal.strip().encode(), "interne")] = _port(
+            public.strip().encode(), "public"
+        )
+    return mapping
 
 
 class DecoyService(ABC):
@@ -85,9 +119,11 @@ class DecoyService(ABC):
         max_connections: int = 200,
         proxy_protocol: bool = False,
         client: httpx.AsyncClient | None = None,
+        public_ports: dict[int, int] | None = None,
     ) -> None:
         self.port = port
         self.proxy_protocol = proxy_protocol
+        self.public_ports = public_ports or {}
         self.banner = banner
         self.ingest_url = ingest_url
         self.ingest_token = ingest_token
@@ -192,13 +228,16 @@ class DecoyService(ABC):
         payload: bytes = b"",
     ) -> RawEvent:
         """Construit un événement conforme au contrat, charge utile déjà plafonnée."""
-        peer = _proxied_peer.get() or writer.get_extra_info("peername") or _UNKNOWN_PEER
+        proxied = _proxied_peer.get()
+        peer = proxied or writer.get_extra_info("peername") or _UNKNOWN_PEER
         source_ip, source_port = peer[0], peer[1]
+        # Le port visé : celui reçu par le relais s'il est connu, traduit en port public.
+        dest_port = proxied.dest_port if proxied is not None else self.port
         event = RawEvent(
             service=self.service,
             source_ip=ip_address(source_ip),
             source_port=int(source_port),
-            dest_port=self.port,
+            dest_port=self.public_ports.get(dest_port, dest_port),
             username=username,
             password=password,
             payload=payload[: MAX_PAYLOAD_BYTES * 2],

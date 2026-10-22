@@ -41,7 +41,6 @@ export function Overview() {
       <section className="panel" aria-labelledby="timeline-title">
         <div className="panel__head">
           <h2 id="timeline-title">Chronologie</h2>
-          <span className="panel__hint">500 dernières tentatives</span>
         </div>
         <Timeline />
       </section>
@@ -50,7 +49,7 @@ export function Overview() {
         <section className="panel" aria-labelledby="feed-title">
           <div className="panel__head">
             <h2 id="feed-title">En direct</h2>
-            <span className="panel__hint">actualisé toutes les 3 s</span>
+            <span className="panel__hint">sans rechargement</span>
           </div>
           <AttackFeed />
         </section>

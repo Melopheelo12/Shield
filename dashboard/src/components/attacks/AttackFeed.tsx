@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useApi } from "../../hooks/useApi";
+import { useEventStream } from "../../hooks/useEventStream";
 import type { NormalizedEvent } from "../../types/events";
+import { mergeFeed } from "../../utils/feed";
 import { formatAttackerText } from "../../utils/format";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
@@ -10,14 +12,15 @@ import { ThreatScore } from "../common/ThreatScore";
 const timeFormat = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
 
 /**
- * Les dernières tentatives, rafraîchies toutes les 3 s.
+ * Les dernières tentatives, en direct (US-20, S3-06).
  *
- * Sondage plutôt que WebSocket tant que le point d'entrée `/ws` (S3-02) n'existe
- * pas : à 3 s, l'objectif de latence d'affichage (< 5 s, US-20) reste tenu.
+ * Un premier chargement par l'API REST remplit la liste, puis chaque trame du
+ * WebSocket s'ajoute en tête : une attaque apparaît sans attendre de sondage.
  */
 export function AttackFeed({ limit = 12 }: { limit?: number }) {
-  const feed = useApi<{ items: NormalizedEvent[] }>(`/api/v1/events?limit=${limit}`, 3000);
-  const items = feed.status === "ready" ? feed.data.items : [];
+  const feed = useApi<{ items: NormalizedEvent[] }>(`/api/v1/events?limit=${limit}`);
+  const stream = useEventStream();
+  const items = mergeFeed(stream.events, feed.status === "ready" ? feed.data.items : [], limit);
   const ids = items.map((event) => event.event_id).join(",");
 
   // Identifiants déjà affichés : mis à jour APRÈS le rendu, pour que seules les
@@ -27,8 +30,8 @@ export function AttackFeed({ limit = 12 }: { limit?: number }) {
     seen.current = new Set(ids ? ids.split(",") : []);
   }, [ids]);
 
-  if (feed.status === "loading") return <LoadingState />;
-  if (feed.status === "error") return <ErrorState message={feed.message} onRetry={feed.reload} />;
+  if (feed.status === "loading" && items.length === 0) return <LoadingState />;
+  if (feed.status === "error" && items.length === 0) return <ErrorState message={feed.message} onRetry={feed.reload} />;
   if (items.length === 0) {
     return <EmptyState title="Aucune tentative pour l'instant." />;
   }
