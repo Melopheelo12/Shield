@@ -1,8 +1,9 @@
 """Recette US-01 — test de charge cadencé sur l'horloge.
 
-Contrairement à ``make load`` (voir #55), chaque envoi est planifié à ``t0 + i / rate`` :
-la latence du collecteur ne ralentit pas l'injection, on mesure donc vraiment la
-tenue à 50 événements par seconde.
+Chaque envoi est planifié à ``t0 + i / rate`` : la latence du collecteur ne ralentit
+pas l'injection, on mesure donc vraiment la tenue à 50 événements par seconde.
+``make load`` est cadencé de la même façon depuis #55 ; ce script y ajoute la mesure
+des latences et un code de sortie sur la durée.
 
     python scripts/qa/load_paced.py --count 3000 --rate 50
 
