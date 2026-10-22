@@ -1,8 +1,8 @@
 import type { Verdict } from "../../types/events";
-import { ThreatScore } from "../common/ThreatScore";
 
 /**
- * Pourquoi ce score (US-13) : chaque règle déclenchée et sa contribution.
+ * Pourquoi ce score (US-13) : chaque règle déclenchée et sa contribution, comme dans
+ * le design — barre empilée, puis le détail règle par règle.
  *
  * La somme est recalculée ici et comparée au score : c'est l'invariant 2 du projet,
  * et un écart doit se voir à l'écran plutôt que passer inaperçu.
@@ -17,24 +17,48 @@ export function RuleContributions({ verdict }: { verdict: Verdict }) {
 
   return (
     <div className="rules">
+      <p className="muted">
+        Chaque point du score provient d'une règle nommée. La somme des contributions doit être égale au score.
+      </p>
+      <div className="rules__stack" aria-hidden="true">
+        {verdict.matches.map((match) => (
+          <span
+            key={match.rule_id}
+            className={`rules__segment rules__segment--${match.severity}`}
+            style={{ width: `${match.contribution}%` }}
+          >
+            {match.contribution >= 12 ? `${match.contribution} · ${match.name}` : match.contribution}
+          </span>
+        ))}
+      </div>
+      <div className="rules__scale" aria-hidden="true">
+        <span>0</span>
+        <span>50</span>
+        <span>100</span>
+      </div>
+
       <ol className="rules__list">
         {verdict.matches.map((match) => (
           <li key={match.rule_id}>
             <div className="rules__head">
               <span>
-                <span className={`badge badge--${match.severity}`}>{match.severity}</span>{" "}
-                <strong>{match.name}</strong> <span className="muted mono">{match.rule_id}</span>
+                <span className={`rules__swatch rules__segment--${match.severity}`} aria-hidden="true" />
+                <span className="mono muted">{match.rule_id}</span> <strong className="mono">{match.name}</strong>{" "}
+                <span className={`badge badge--${match.severity}`}>{match.severity}</span>
               </span>
-              <span className="num rules__points">+{match.contribution}</span>
+              <span className="num rules__points mono" title={`poids ${match.weight}`}>
+                +{match.contribution}
+              </span>
             </div>
             <p className="muted">{match.description}</p>
           </li>
         ))}
       </ol>
+
       <div className={`rules__total${consistent ? "" : " rules__total--broken"}`}>
-        <span>Somme des contributions</span>
-        <span className="num">
-          {total} {consistent ? "=" : "≠"} <ThreatScore score={verdict.threat_score} />
+        <span>{consistent ? "Verdict cohérent — somme des contributions égale au score" : "Somme des contributions ≠ score"}</span>
+        <span className="mono">
+          {verdict.matches.map((match) => match.contribution).join(" + ")} {consistent ? "=" : "≠"} {verdict.threat_score}
         </span>
       </div>
       {!consistent && (

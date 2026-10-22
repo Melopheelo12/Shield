@@ -24,3 +24,14 @@ export const PROFILES: Record<AttackerProfile, string> = {
   tentative_exploitation: "Tentative d'exploitation",
   indetermine: "Indéterminé",
 };
+
+/** Libellés des techniques ATT&CK attribuées par le collecteur (même table que mitre.py). */
+export const TECHNIQUES: Record<string, string> = {
+  "T1110.001": "Brute Force: Password Guessing",
+  "T1110.003": "Brute Force: Password Spraying",
+  T1046: "Network Service Discovery",
+  T1190: "Exploit Public-Facing Application",
+  T1083: "File and Directory Discovery",
+  T1059: "Command and Scripting Interpreter",
+  T1078: "Valid Accounts",
+};

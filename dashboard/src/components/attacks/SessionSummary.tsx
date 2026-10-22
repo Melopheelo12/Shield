@@ -1,10 +1,12 @@
 import { formatDuration, heaviestFirst, sessionPath, type SessionDetail } from "../../api/sessions";
 import { useApi } from "../../hooks/useApi";
 import { PROFILES } from "../../utils/constants";
-import { formatTimestamp } from "../../utils/format";
+import { attemptSummary, formatAttackerText, formatTimestamp } from "../../utils/format";
 import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
-import { ThreatScore } from "../common/ThreatScore";
+import { ThreatScore, threatLevel } from "../common/ThreatScore";
+
+const timeFormat = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
 
 /**
  * Toute la session d'une tentative (US-26) : un attaquant essaie rarement une seule
@@ -45,6 +47,24 @@ export function SessionSummary({ sessionId }: { sessionId: string }) {
           </dd>
         </div>
       </dl>
+
+      {detail.events.length > 0 && (
+        <ol className="session-timeline" aria-label="Chronologie de la session">
+          {[...detail.events]
+            .sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
+            .slice(-6)
+            .map((item) => (
+              <li key={item.event_id}>
+                <span className={`session-timeline__dot session-timeline__dot--${threatLevel(item.threat_score)}`} aria-hidden="true" />
+                <time className="mono muted" dateTime={item.occurred_at}>
+                  {timeFormat.format(new Date(item.occurred_at))}
+                </time>
+                <span className="mono">{formatAttackerText(attemptSummary(item), 56)}</span>
+                <ThreatScore score={item.threat_score} />
+              </li>
+            ))}
+        </ol>
+      )}
 
       {rules.length === 0 ? (
         <p className="muted">Aucune règle déclenchée sur la session.</p>
