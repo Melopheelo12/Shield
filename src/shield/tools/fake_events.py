@@ -27,8 +27,10 @@ import asyncio
 import json
 import random
 import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address
+from itertools import count as forever
 from pathlib import Path
 
 import httpx
@@ -173,6 +175,11 @@ def make_burst(
     return events
 
 
+#: Envois simultanés au plus. Au-delà, l'injection attend une réponse : la cadence ne
+#: peut plus être tenue, mais la mémoire du générateur reste bornée.
+MAX_IN_FLIGHT = 200
+
+
 async def _post(client: httpx.AsyncClient, url: str, token: str, event: RawEvent) -> bool:
     try:
         response = await client.post(
@@ -183,9 +190,57 @@ async def _post(client: httpx.AsyncClient, url: str, token: str, event: RawEvent
         return False
 
 
+async def send_paced(
+    url: str,
+    token: str,
+    events: Iterator[RawEvent],
+    rate: float,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> tuple[int, int]:
+    """Envoie ``events`` cadencés sur l'horloge. Retourne (envoyés, échecs).
+
+    Le *i*-ème envoi part à ``t0 + i / rate``, sans attendre la réponse du précédent.
+    Attendre la réponse puis dormir ``1 / rate`` ajoutait la latence du collecteur à
+    chaque envoi : le test de charge F1 durait 82 s au lieu de 60, et sous-estimait la
+    charge réelle (#55). Les événements sont tirés dans l'ordre : à graine égale, la
+    séquence envoyée reste identique.
+    """
+    interval = 1.0 / rate if rate > 0 else 0.0
+    sent = failed = 0
+    slots = asyncio.Semaphore(MAX_IN_FLIGHT)
+    in_flight: set[asyncio.Task[None]] = set()
+    loop = asyncio.get_running_loop()
+
+    async with httpx.AsyncClient(
+        timeout=5.0, transport=transport, limits=httpx.Limits(max_connections=MAX_IN_FLIGHT)
+    ) as client:
+
+        async def send(event: RawEvent) -> None:
+            nonlocal sent, failed
+            try:
+                ok = await _post(client, url, token, event)
+            finally:
+                slots.release()
+            sent += int(ok)
+            failed += int(not ok)
+            if (sent + failed) % 100 == 0:
+                print(f"envoyés={sent} échecs={failed}", file=sys.stderr)
+
+        start = loop.time()
+        for index, event in enumerate(events):
+            if interval:
+                await asyncio.sleep(max(0.0, start + index * interval - loop.time()))
+            await slots.acquire()
+            task = asyncio.create_task(send(event))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
+        await asyncio.gather(*in_flight)
+    return sent, failed
+
+
 async def run(args: argparse.Namespace) -> int:
     rng = random.Random(args.seed)
-    interval = 1.0 / args.rate if args.rate > 0 else 0.0
 
     if args.out:
         path = Path(args.out)
@@ -195,21 +250,9 @@ async def run(args: argparse.Namespace) -> int:
         print(f"{args.count} événements écrits dans {path}")
         return 0
 
-    sent = failed = 0
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        remaining = args.count if args.count else None
-        while remaining is None or remaining > 0:
-            event = make_event(rng)
-            ok = await _post(client, args.url, args.token, event)
-            sent += int(ok)
-            failed += int(not ok)
-            if remaining is not None:
-                remaining -= 1
-            if interval:
-                await asyncio.sleep(interval)
-            if (sent + failed) % 100 == 0:
-                print(f"envoyés={sent} échecs={failed}", file=sys.stderr)
-
+    indices = range(args.count) if args.count else forever()
+    events = (make_event(rng) for _ in indices)
+    sent, failed = await send_paced(args.url, args.token, events, args.rate)
     print(f"terminé — envoyés={sent} échecs={failed}")
     return 0 if failed == 0 else 1
 
