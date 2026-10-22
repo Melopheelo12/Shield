@@ -5,29 +5,28 @@ import { LoadingState } from "../components/common/LoadingState";
 import { AttackMap } from "../components/threat-map/AttackMap";
 import { CountryPanel } from "../components/threat-map/CountryPanel";
 import { MapLegend } from "../components/threat-map/MapLegend";
+import { STATS, type CountryCount } from "../api/stats";
 import { useApi } from "../hooks/useApi";
-import type { NormalizedEvent } from "../types/events";
-import { aggregateByCountry } from "../utils/geo";
-
-const SAMPLE = 500;
+import { fromCountryCounts } from "../utils/geo";
 
 /** Carte des origines : d'où viennent les attaques, pour savoir quoi contrer. */
 export function ThreatMap() {
-  const events = useApi<{ items: NormalizedEvent[] }>(`/api/v1/events?limit=${SAMPLE}`, 10_000);
-  const items = events.status === "ready" ? events.data.items : null;
-  const { countries, unlocated } = useMemo(() => aggregateByCountry(items ?? []), [items]);
+  const stats = useApi<{ items: CountryCount[] }>(STATS.byCountry, 15_000);
+  const items = stats.status === "ready" ? stats.data.items : null;
+  const { countries, unlocated } = useMemo(() => fromCountryCounts(items ?? []), [items]);
+  const located = countries.reduce((sum, country) => sum + country.events, 0);
   const [selected, setSelected] = useState<string | null>(null);
 
-  if (events.status === "loading") return <LoadingState />;
-  if (events.status === "error") return <ErrorState message={events.message} onRetry={events.reload} />;
+  if (stats.status === "loading") return <LoadingState />;
+  if (stats.status === "error") return <ErrorState message={stats.message} onRetry={stats.reload} />;
 
   return (
     <>
       {unlocated > 0 && (
         <p className="notice" role="note">
-          {unlocated.toLocaleString("fr-FR")} des {items?.length.toLocaleString("fr-FR")} dernières
-          tentatives n'ont pas de pays : la géolocalisation GeoIP (US-07) n'est pas encore active
-          côté collecteur. Elles n'apparaissent pas sur la carte.
+          {unlocated.toLocaleString("fr-FR")} tentative{unlocated > 1 ? "s" : ""} sur{" "}
+          {(unlocated + located).toLocaleString("fr-FR")} n'ont pas de pays : base GeoLite2 absente du
+          collecteur, ou adresse inconnue. Elles n'apparaissent pas sur la carte.
         </p>
       )}
 
@@ -35,7 +34,7 @@ export function ThreatMap() {
         <section className="panel" aria-labelledby="map-title">
           <div className="panel__head">
             <h2 id="map-title">Origine des tentatives</h2>
-            <span className="panel__hint">{SAMPLE} dernières tentatives</span>
+            <span className="panel__hint">{located.toLocaleString("fr-FR")} tentatives situées</span>
           </div>
           <AttackMap countries={countries} selected={selected} onSelect={setSelected} />
           {countries.length > 0 && <MapLegend max={countries[0].events} />}
