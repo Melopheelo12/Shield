@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { summarize } from "../src/utils/scorecard";
+import { describe, expect, it, vi } from "vitest";
+import { loadGameStart, reportVerdict, saveGameStart, summarize } from "../src/utils/scorecard";
 
 describe("summarize — bilan d'une partie de sandbox", () => {
   it("n'a pas de taux tant que rien n'a été tenté", () => {
@@ -22,5 +22,49 @@ describe("summarize — bilan d'une partie de sandbox", () => {
       "R-010": { attempted: false, detected: true },
     });
     expect(summary).toEqual({ attempted: 1, detected: 0, missed: ["R-001"], rate: 0 });
+  });
+});
+
+describe("partie mesurée par le collecteur (US-37)", () => {
+  const report = (detection_rate: number | null, target_met = false) => ({
+    since: null,
+    events: 10,
+    detected: 8,
+    detection_rate,
+    target: 80,
+    target_met,
+    by_service: {},
+    missed_by_technique: [],
+  });
+
+  it("annonce l'objectif atteint ou manqué, avec les chiffres", () => {
+    expect(reportVerdict(report(85, true))).toEqual({
+      tone: "ok",
+      text: "Objectif atteint : 85 % détectées (objectif 80 %).",
+    });
+    expect(reportVerdict(report(79)).tone).toBe("down");
+    expect(reportVerdict(report(79)).text).toContain("il en faut 80 %");
+  });
+
+  it("sans tentative, ne conclut rien", () => {
+    expect(reportVerdict(report(null)).tone).toBe("pending");
+  });
+
+  it("garde le début de partie et ignore une valeur illisible", () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => void values.set(key, value),
+        removeItem: (key: string) => void values.delete(key),
+      },
+    });
+    saveGameStart("2026-10-14T10:00:00.000Z");
+    expect(loadGameStart()).toBe("2026-10-14T10:00:00.000Z");
+    values.set("shield.sandbox.debut", "n'importe quoi");
+    expect(loadGameStart()).toBeNull();
+    saveGameStart(null);
+    expect(values.size).toBe(0);
+    vi.unstubAllGlobals();
   });
 });
