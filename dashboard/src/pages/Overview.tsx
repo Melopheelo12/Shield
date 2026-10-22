@@ -41,7 +41,6 @@ export function Overview() {
       <section className="panel" aria-labelledby="timeline-title">
         <div className="panel__head">
           <h2 id="timeline-title">Chronologie</h2>
-          <span className="panel__hint">500 dernières tentatives</span>
         </div>
         <Timeline />
       </section>
