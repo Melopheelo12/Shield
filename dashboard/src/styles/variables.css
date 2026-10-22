@@ -32,9 +32,10 @@
   --danger-border: #5a2a22;
   --danger-bg: #2a1512;
 
-  --svc-ssh: #6ea8fe;
-  --svc-http: #b48cff;
-  --svc-ftp: #3fd0b4;
+  /* Couleurs des leurres, reprises du design (répartition par leurre). */
+  --svc-ssh: #3fd0b4;
+  --svc-http: #6ea8fe;
+  --svc-ftp: #b59cff;
 
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
