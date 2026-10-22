@@ -1,4 +1,4 @@
-import type { ServiceName } from "../types/events";
+import type { AttackerProfile, ServiceName } from "../types/events";
 
 export const SERVICES: readonly ServiceName[] = ["ssh", "http", "ftp"];
 
@@ -16,3 +16,11 @@ export const DEFAULT_PERIOD: PeriodKey = "24h";
 
 /** Taille de page du tableau d'événements (l'API plafonne `limit` à 500). */
 export const EVENTS_PAGE_SIZE = 50;
+
+/** Libellés des profils d'attaquant établis par l'agent défenseur. */
+export const PROFILES: Record<AttackerProfile, string> = {
+  balayage_opportuniste: "Balayage opportuniste",
+  force_brute_ciblee: "Force brute ciblée",
+  tentative_exploitation: "Tentative d'exploitation",
+  indetermine: "Indéterminé",
+};
