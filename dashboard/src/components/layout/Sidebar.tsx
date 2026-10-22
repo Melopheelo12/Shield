@@ -6,9 +6,12 @@ export function Sidebar({ current }: { current: string }) {
     <nav className="sidebar" aria-label="Navigation principale">
       <a className="brand" href="#/">
         <span className="brand__mark" aria-hidden="true">
-          <Icon name="defense" size={20} />
+          <Icon name="defense" size={26} />
         </span>
-        SHIELD
+        <span className="brand__name">
+          SHIELD
+          <small>Honeypot</small>
+        </span>
       </a>
       <ul>
         {ROUTES.map((route) => (
@@ -24,6 +27,12 @@ export function Sidebar({ current }: { current: string }) {
           </li>
         ))}
       </ul>
+      {/* Un lien, pas un bouton : l'arrêt se fait sur le serveur (US-48), la page Défense
+          en donne la procédure. Aucune action destructive ne part du navigateur. */}
+      <a className="sidebar__emergency" href="#/defense">
+        <Icon name="power" size={16} />
+        Arrêt d'urgence
+      </a>
     </nav>
   );
 }
