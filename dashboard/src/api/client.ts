@@ -6,6 +6,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** `detail` renvoyé par le collecteur (FastAPI), s'il y en a un. */
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -52,4 +54,28 @@ export async function getJson<T>(path: string, params?: QueryParams, signal?: Ab
 export async function getText(path: string, params?: QueryParams, signal?: AbortSignal): Promise<string> {
   const response = await authorizedFetch(path, params, signal, "text/plain");
   return response.text();
+}
+
+/**
+ * Écriture (PUT, POST) en JSON, jeton compris. Un refus 422 lève une `ApiError`
+ * portant le `detail` du collecteur, pour l'afficher à côté du champ fautif.
+ */
+export async function sendJson<T>(method: "PUT" | "POST", path: string, body?: unknown): Promise<T> {
+  const token = getToken();
+  const response = await fetch(path, {
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === 401) logout();
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    const detail = typeof payload?.detail === "string" ? payload.detail : undefined;
+    throw new ApiError(response.status, `HTTP ${response.status}`, detail);
+  }
+  return (await response.json()) as T;
 }
