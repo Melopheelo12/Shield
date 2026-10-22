@@ -254,3 +254,65 @@ async def test_la_maintenance_survit_a_un_echec(repository, monkeypatch):
         await asyncio.sleep(0)
     task.cancel()
     assert len(calls) >= 3
+
+
+async def test_un_json_tres_imbrique_est_rejete_et_trace_pas_une_erreur_500(client, repository):
+    """#54 : 32 000 niveaux d'imbrication faisaient déborder la pile (HTTP 500)."""
+    body = b'{"username":' + b"[" * 32_000 + b"]" * 32_000 + b"}"
+    response = await client.post(
+        "/api/v1/ingest", content=body, headers={**HEADERS, "Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    [(reason, raw_body)] = repository.rejected
+    assert "trop imbriqué" in reason
+    assert raw_body.startswith(b'{"username":[[[')
+
+
+async def test_une_erreur_de_validation_ne_renvoie_pas_l_entree(client, repository):
+    """La réponse 422 ne réencode pas l'entrée fautive : c'est elle qui débordait (#54)."""
+    nested = {"service": "telnet", "username": [[[["x"]]]]}
+    response = await client.post("/api/v1/ingest", json=nested, headers=HEADERS)
+    assert response.status_code == 422
+    assert "input" not in response.text
+    assert len(repository.rejected) == 1
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        (b'{"a": 1}', False),
+        (b'{"a": [[[[1]]]]}', False),
+        (b'{"a": [[[[[[[[1]]]]]]]]}', True),
+        (b'{"payload": "[[[[[[[[[[[[[[[[[["}', False),  # crochets dans une chaîne
+        (b'{"a": "\\"}', False),  # antislash échappé, la chaîne se ferme bien
+    ],
+)
+def test_la_profondeur_ignore_les_chaines(body, expected):
+    assert api.json_depth_exceeds(body, 8) is expected
+
+
+async def test_un_corps_trop_volumineux_est_refuse_mais_trace(client, repository):
+    """#54 : sans plafond, un corps de plusieurs Mo était décodé en entier."""
+    event = ssh_attempt(payload="A" * (api.MAX_INGEST_BODY_BYTES + 1))
+    response = await client.post("/api/v1/ingest", json=event, headers=HEADERS)
+    assert response.status_code == 413
+    assert not repository.events
+    [(reason, raw_body)] = repository.rejected
+    assert "trop volumineux" in reason
+    assert raw_body.startswith(b'{"')
+
+
+async def test_sans_jeton_un_corps_trop_volumineux_n_est_ni_lu_ni_trace(client, repository):
+    event = ssh_attempt(payload="A" * (api.MAX_INGEST_BODY_BYTES + 1))
+    response = await client.post("/api/v1/ingest", json=event)
+    assert response.status_code == 401
+    assert not repository.rejected
+
+
+async def test_un_evenement_normal_passe_sous_le_plafond(client, repository):
+    """Une charge de 8 Kio, le maximum émis par un leurre, tient largement sous le plafond."""
+    response = await client.post(
+        "/api/v1/ingest", json=ssh_attempt(payload="QUFB" * 2730), headers=HEADERS
+    )
+    assert response.status_code == 202
+    assert len(repository.events) == 1
