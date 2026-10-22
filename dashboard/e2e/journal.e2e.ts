@@ -24,7 +24,7 @@ test("parcours 2 — filtrer le journal et ouvrir le détail avec les règles", 
   await expect(drawer.getByRole("heading", { name: "Verdict de l'agent défenseur" })).toBeVisible();
   // Le verdict explique le score règle par règle, et la somme égale le score (invariant 2).
   await expect(drawer.locator(".rules__list li").first()).toBeVisible();
-  await expect(drawer.getByText("Somme des contributions")).toBeVisible();
+  await expect(drawer.locator(".rules__total")).toContainText("somme des contributions égale au score");
   await expect(drawer.locator(".rules__total--broken")).toHaveCount(0);
   await expect(drawer.getByRole("heading", { name: "Session de cet attaquant" })).toBeVisible();
 

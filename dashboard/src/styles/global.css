@@ -771,9 +771,9 @@ button:disabled {
 .drawer {
   position: fixed;
   inset: 0 0 0 auto;
-  width: min(560px, 100vw);
+  width: min(680px, 100vw);
   overflow-y: auto;
-  padding: 20px 24px 40px;
+  padding: 24px 28px 48px;
   background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
@@ -786,8 +786,98 @@ button:disabled {
   margin-bottom: 16px;
 }
 
-.drawer__head h2 {
-  font-size: 17px;
+.drawer__head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.drawer__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.drawer__title h2 {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.drawer__note {
+  margin: -4px 0 8px;
+  font-size: 12px;
+}
+
+/* Étiquette du design (profil, leurre, technique). */
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: #1c232d;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pill--low { background: var(--sev-low-bg); color: var(--sev-low); }
+.pill--medium { background: var(--sev-medium-bg); color: var(--sev-medium); }
+.pill--high,
+.pill--critical { background: var(--sev-high-bg); color: var(--sev-high); }
+
+/* Score de menace et repère du seuil d'alerte. */
+.gauge {
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.gauge__value {
+  font-family: var(--font-mono);
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.gauge__value small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.gauge__value--low { color: var(--sev-low); }
+.gauge__value--medium { color: var(--sev-medium); }
+.gauge__value--high,
+.gauge__value--critical { color: var(--sev-critical); }
+
+.gauge__track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: #1c232d;
+}
+
+.gauge__fill {
+  height: 6px;
+  padding: 0;
+  border-radius: 3px;
+}
+
+.gauge__mark {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 14px;
+  background: var(--text);
+}
+
+.gauge__note {
+  font-size: 12px;
 }
 
 .drawer__section {
@@ -855,16 +945,80 @@ button:disabled {
   font-weight: 700;
 }
 
-.rules__total {
+.rules {
+  display: grid;
+  gap: 10px;
+}
+
+.rules > p {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* Barre empilée des contributions : 1 % de largeur = 1 point de score. */
+.rules__stack {
+  display: flex;
+  gap: 2px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.rules__segment {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rules__segment--low { background: var(--sev-low); }
+.rules__segment--medium { background: var(--sev-medium); }
+.rules__segment--high { background: var(--sev-high); }
+.rules__segment--critical { background: var(--sev-critical); }
+
+.rules__scale {
   display: flex;
   justify-content: space-between;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rules__swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  padding: 0;
+  border-radius: 2px;
+}
+
+.rules__total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: #0f2a25;
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
+.rules__total .mono {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .rules__total--broken {
+  background: var(--danger-bg);
   color: var(--sev-critical);
 }
 
@@ -1218,3 +1372,37 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+/* Chronologie d'une session, la plus ancienne en haut, comme dans le design. */
+.session-timeline {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.session-timeline li {
+  display: grid;
+  grid-template-columns: 10px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.session-timeline li > .mono:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-timeline__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--sev-low);
+}
+
+.session-timeline__dot--medium { border-color: var(--sev-medium); }
+.session-timeline__dot--high,
+.session-timeline__dot--critical { border-color: var(--sev-high); background: var(--sev-high); }
