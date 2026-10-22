@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { EventFilters } from "../../hooks/useFilters";
+import { MIN_SCORES, type EventFilters } from "../../hooks/useFilters";
 import { PERIODS, SERVICES, type PeriodKey } from "../../utils/constants";
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
   onReset: () => void;
 }
 
-/** Période, service, pays. L'état vit dans l'URL (voir `useFilters`). */
+/** Période, leurre, pays et score minimal. L'état vit dans l'URL (voir `useFilters`). */
 export function FilterBar({ filters, onChange, onReset }: Props) {
   // Le pays se saisit lettre par lettre : on ne pousse dans l'URL qu'un code complet.
   const [country, setCountry] = useState(filters.country);
@@ -21,7 +21,7 @@ export function FilterBar({ filters, onChange, onReset }: Props) {
   };
 
   return (
-    <form className="filter-bar" role="search" onSubmit={(event) => event.preventDefault()}>
+    <form className="filter-bar filter-bar--card" role="search" onSubmit={(event) => event.preventDefault()}>
       <label>
         Période
         <select
@@ -37,7 +37,7 @@ export function FilterBar({ filters, onChange, onReset }: Props) {
       </label>
 
       <label>
-        Service
+        Leurre
         <select
           value={filters.service}
           onChange={(event) => onChange({ service: event.target.value as EventFilters["service"] })}
@@ -70,6 +70,24 @@ export function FilterBar({ filters, onChange, onReset }: Props) {
           Code pays à deux lettres (ISO 3166-1)
         </span>
       </label>
+
+      <div className="filter-bar__field">
+        <span id="filter-score" className="filter-bar__label">
+          Score minimum
+        </span>
+        <div className="segmented" role="group" aria-labelledby="filter-score">
+          {MIN_SCORES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={filters.minScore === value}
+              onClick={() => onChange({ minScore: value })}
+            >
+              {value === 0 ? "Tous" : `≥ ${value}`}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <button type="button" onClick={onReset}>
         Réinitialiser

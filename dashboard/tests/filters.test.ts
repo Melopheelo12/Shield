@@ -6,20 +6,27 @@ describe("filtres ↔ URL", () => {
     expect(parseFilters("")).toEqual(DEFAULT_FILTERS);
   });
 
-  it("lit période, service et pays", () => {
-    expect(parseFilters("?periode=7d&service=ssh&pays=fr")).toEqual({
+  it("lit période, service, pays et score minimal", () => {
+    expect(parseFilters("?periode=7d&service=ssh&pays=fr&score=60")).toEqual({
       period: "7d",
       service: "ssh",
       country: "FR",
+      minScore: 60,
     });
   });
 
+  it("n'accepte que les paliers de score 30 et 60", () => {
+    expect(parseFilters("?score=45").minScore).toBe(0);
+    expect(parseFilters("?score=-1").minScore).toBe(0);
+    expect(parseFilters("?score=30").minScore).toBe(30);
+  });
+
   it("ignore les valeurs inconnues ou malformées", () => {
-    expect(parseFilters("?periode=1an&service=telnet&pays=<script>")).toEqual(DEFAULT_FILTERS);
+    expect(parseFilters("?periode=1an&service=telnet&pays=<script>&score=abc")).toEqual(DEFAULT_FILTERS);
   });
 
   it("aller-retour sans perte", () => {
-    const filters = { period: "1h", service: "ftp", country: "CN" } as const;
+    const filters = { period: "1h", service: "ftp", country: "CN", minScore: 30 } as const;
     expect(parseFilters(serializeFilters(filters))).toEqual(filters);
   });
 

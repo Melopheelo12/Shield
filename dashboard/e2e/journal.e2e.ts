@@ -14,7 +14,7 @@ test("parcours 2 — filtrer le journal et ouvrir le détail avec les règles", 
   await ingest(request, { service: "ssh", username: "bruit-ssh" });
 
   await login(page, "/#/journal");
-  await page.getByLabel("Service").selectOption("http");
+  await page.getByLabel("Leurre").selectOption("http");
   await expect(page).toHaveURL(/service=http/);
   const table = page.getByRole("region", { name: "Journal des événements" });
   await expect(table.getByText("bruit-ssh")).toHaveCount(0);

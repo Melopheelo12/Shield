@@ -1,11 +1,14 @@
 import type { NormalizedEvent } from "../../types/events";
 import type { LoadState } from "../../hooks/useApi";
 import type { CursorPagination } from "../../hooks/useEventsPage";
-import { formatAttackerText, formatCountry, formatTimestamp } from "../../utils/format";
+import { attemptSummary, formatAttackerText } from "../../utils/format";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
 import { ThreatScore } from "../common/ThreatScore";
+
+const timeFormat = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
+const dateFormat = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
 
 type Props = LoadState<NormalizedEvent[]> &
   CursorPagination & {
@@ -43,15 +46,15 @@ function renderBody(props: Props) {
     case "ready":
       return (
         <div className="table-scroll">
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
                 <th scope="col">Horodatage</th>
-                <th scope="col">Service</th>
-                <th scope="col">IP source</th>
-                <th scope="col">Pays</th>
-                <th scope="col">Identifiant</th>
-                <th scope="col">Technique</th>
+                <th scope="col">Source</th>
+                <th scope="col">Opérateur</th>
+                <th scope="col">Leurre</th>
+                <th scope="col">Tentative</th>
+                <th scope="col">ATT&amp;CK</th>
                 <th scope="col" className="num">
                   Score
                 </th>
@@ -62,20 +65,34 @@ function renderBody(props: Props) {
                 <tr
                   key={event.event_id}
                   onClick={props.onSelect ? () => props.onSelect?.(event) : undefined}
+                  onKeyDown={
+                    props.onSelect
+                      ? (key) => (key.key === "Enter" || key.key === " ") && props.onSelect?.(event)
+                      : undefined
+                  }
+                  tabIndex={props.onSelect ? 0 : undefined}
                   className={props.onSelect ? "clickable" : undefined}
                 >
                   <td>
-                    <time dateTime={event.occurred_at}>{formatTimestamp(event.occurred_at)}</time>
+                    <time className="stamp" dateTime={event.occurred_at}>
+                      <span className="mono">{timeFormat.format(new Date(event.occurred_at))}</span>
+                      <span className="muted">{dateFormat.format(new Date(event.occurred_at))}</span>
+                    </time>
+                  </td>
+                  <td>
+                    {event.country_code && <span className="cc">{event.country_code}</span>}
+                    <span className="mono">{event.source_ip}</span>
+                  </td>
+                  <td className="muted truncate" title={event.as_org ?? undefined}>
+                    {event.asn ? `AS${event.asn}${event.as_org ? ` · ${event.as_org}` : ""}` : "—"}
                   </td>
                   <td>
                     <span className={`service service--${event.service}`}>{event.service.toUpperCase()}</span>
                   </td>
-                  <td className="mono">{event.source_ip}</td>
-                  <td>{formatCountry(event.country_code)}</td>
-                  <td className="mono" title={event.username || undefined}>
-                    {formatAttackerText(event.username)}
+                  <td className="mono feed__attempt" title={attemptSummary(event)}>
+                    {formatAttackerText(attemptSummary(event), 48)}
                   </td>
-                  <td className="mono">{event.technique_id ?? "—"}</td>
+                  <td className="mono muted">{event.technique_id ?? "—"}</td>
                   <td className="num">
                     <ThreatScore score={event.threat_score} />
                   </td>

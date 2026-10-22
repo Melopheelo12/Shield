@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { AttackDetailDrawer } from "../components/attacks/AttackDetailDrawer";
 import { EventTable } from "../components/attacks/EventTable";
 import { FilterBar } from "../components/attacks/FilterBar";
+import { QuickExport } from "../components/attacks/QuickExport";
 import { useEventsPage } from "../hooks/useEventsPage";
 import { useFilters } from "../hooks/useFilters";
 import type { NormalizedEvent } from "../types/events";
@@ -15,6 +16,10 @@ export function Attacks() {
 
   return (
     <section className="grid" aria-label="Journal des attaques">
+      <div className="page-intro">
+        <p className="muted">Chaque tentative capturée par les leurres, enrichie et notée.</p>
+        <QuickExport />
+      </div>
       <FilterBar filters={filters} onChange={updateFilters} onReset={resetFilters} />
       <EventTable {...events} onSelect={setSelected} />
       {selected && <AttackDetailDrawer event={selected} onClose={close} />}
