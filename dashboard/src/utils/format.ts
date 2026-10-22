@@ -1,3 +1,4 @@
+import { decodePayload } from "./base64";
 const timestampFormat = new Intl.DateTimeFormat("fr-FR", {
   dateStyle: "short",
   timeStyle: "medium",
@@ -20,4 +21,14 @@ export function formatCountry(code: string | null): string {
 export function formatAttackerText(value: string, max = 40): string {
   if (!value) return "—";
   return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/**
+ * La tentative en une ligne, pour un flux ou un tableau : l'identifiant essayé, sinon
+ * la première ligne de la charge utile (déjà rendue inerte par decodePayload).
+ */
+export function attemptSummary(event: { username: string; password: string; payload: string }): string {
+  if (event.username) return `${event.username} / ${event.password || "—"}`;
+  const firstLine = decodePayload(event.payload).text.split("\\r\\n")[0].split("\\n")[0].trim();
+  return firstLine || "connexion sans échange";
 }

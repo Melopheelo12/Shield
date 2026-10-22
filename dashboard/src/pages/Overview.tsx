@@ -5,29 +5,47 @@ import { ByService } from "../components/charts/ByService";
 import { Timeline } from "../components/charts/Timeline";
 import { TopCredentials } from "../components/charts/TopCredentials";
 import { TopSourceIps } from "../components/charts/TopSourceIps";
+import { CountryOrigins } from "../components/threat-map/CountryOrigins";
 import { useApi } from "../hooks/useApi";
 import type { Overview as OverviewStats } from "../types/events";
 
 const number = new Intl.NumberFormat("fr-FR");
+const ratio = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 });
 
-/** Vue d'ensemble : chiffres clés, chronologie, classements et flux en direct. */
+/** Seuil du score au-delà duquel une tentative est traitée en alerte. */
+const ALERT_SCORE = 60;
+
+/** Vue d'ensemble : indicateurs, activité, répartition, flux en direct et origines. */
 export function Overview() {
   const stats = useApi<OverviewStats>("/api/v1/stats/overview", 5000);
+  const alerts = useApi<{ items: unknown[] }>("/api/v1/alerts?limit=500", 30_000);
   const data = stats.status === "ready" ? stats.data : null;
+  const alertCount = alerts.status === "ready" ? alerts.data.items.length : null;
   const show = (value: number | undefined) => (value === undefined ? "—" : number.format(value));
 
   return (
     <>
       {stats.status === "error" && <ErrorState message={stats.message} onRetry={stats.reload} />}
 
-      <section className="grid grid--stats" aria-label="Chiffres clés">
-        <StatCard label="Tentatives enregistrées" value={show(data?.events)} />
-        <StatCard label="Adresses IP uniques" value={show(data?.unique_ips)} />
-        <StatCard label="Sessions d'attaque" value={show(data?.sessions)} />
+      <section className="grid grid--stats" aria-label="Indicateurs">
+        <StatCard label="Tentatives" value={show(data?.events)} hint="depuis la mise en service" />
+        <StatCard label="IP uniques" value={show(data?.unique_ips)} hint="adresses sources distinctes" />
         <StatCard
-          label="Menace maximale"
-          value={data ? `${data.max_threat_score}/100` : "—"}
-          hint={data?.rejected ? `${number.format(data.rejected)} événement(s) rejeté(s)` : undefined}
+          label="Sessions"
+          value={show(data?.sessions)}
+          hint={data?.sessions ? `${ratio.format(data.events / data.sessions)} tentative(s) par session` : undefined}
+        />
+        <StatCard
+          label="Score de menace max"
+          value={data ? data.max_threat_score : "—"}
+          unit="/100"
+          tone={data && data.max_threat_score >= ALERT_SCORE ? "danger" : undefined}
+          hint={alertCount === null ? undefined : `${number.format(alertCount)} alerte(s) déclenchée(s)`}
+        />
+        <StatCard
+          label="Rejetés à l'ingestion"
+          value={show(data?.rejected)}
+          hint={data ? (data.rejected ? "à examiner dans les journaux" : "aucune perte détectée") : undefined}
         />
       </section>
 
@@ -38,45 +56,57 @@ export function Overview() {
         </p>
       )}
 
-      <section className="panel" aria-labelledby="timeline-title">
-        <div className="panel__head">
-          <h2 id="timeline-title">Chronologie</h2>
-        </div>
-        <Timeline />
-      </section>
-
-      <div className="grid grid--2">
-        <section className="panel" aria-labelledby="feed-title">
+      <div className="grid grid--wide">
+        <section className="panel" aria-labelledby="activity-title">
           <div className="panel__head">
-            <h2 id="feed-title">En direct</h2>
-            <span className="panel__hint">sans rechargement</span>
+            <h2 id="activity-title">Activité</h2>
+            <span className="panel__hint">rouge : tranche avec une menace ≥ {ALERT_SCORE}</span>
+          </div>
+          <Timeline />
+        </section>
+        <section className="panel" aria-labelledby="services-title">
+          <div className="panel__head">
+            <h2 id="services-title">Répartition par leurre</h2>
+          </div>
+          <ByService />
+        </section>
+      </div>
+
+      <div className="grid grid--wide">
+        <section className="panel panel--flush" aria-labelledby="feed-title">
+          <div className="panel__head">
+            <h2 id="feed-title">Flux en direct</h2>
+            <a className="panel__hint" href="#/journal">
+              Tous les événements →
+            </a>
           </div>
           <AttackFeed />
         </section>
 
         <div className="grid">
-          <section className="panel" aria-labelledby="services-title">
+          <section className="panel" aria-labelledby="origins-title">
             <div className="panel__head">
-              <h2 id="services-title">Par service</h2>
+              <h2 id="origins-title">Origine des IP</h2>
             </div>
-            <ByService />
+            <CountryOrigins />
           </section>
           <section className="panel" aria-labelledby="ips-title">
             <div className="panel__head">
               <h2 id="ips-title">Adresses les plus actives</h2>
-              <a className="panel__hint" href="#/defense">bloquer →</a>
+              <a className="panel__hint" href="#/defense">
+                bloquer →
+              </a>
             </div>
             <TopSourceIps />
           </section>
+          <section className="panel" aria-labelledby="creds-title">
+            <div className="panel__head">
+              <h2 id="creds-title">Identifiants les plus essayés</h2>
+            </div>
+            <TopCredentials />
+          </section>
         </div>
       </div>
-
-      <section className="panel" aria-labelledby="creds-title">
-        <div className="panel__head">
-          <h2 id="creds-title">Identifiants les plus essayés</h2>
-        </div>
-        <TopCredentials />
-      </section>
     </>
   );
 }
