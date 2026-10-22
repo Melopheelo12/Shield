@@ -23,8 +23,8 @@ export function useEventsPage(
   filters: EventFilters,
   pageSize = EVENTS_PAGE_SIZE,
 ): LoadState<NormalizedEvent[]> & CursorPagination & { reload: () => void } {
-  const { period, service, country } = filters;
-  const filtersKey = `${period}|${service}|${country}`;
+  const { period, service, country, minScore } = filters;
+  const filtersKey = `${period}|${service}|${country}|${minScore}`;
   const [stack, setStack] = useState<{ key: string; cursors: (string | null)[] }>({
     key: filtersKey,
     cursors: [null],
@@ -43,7 +43,7 @@ export function useEventsPage(
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: "loading" });
-    fetchEventsPage({ period, service, country }, cursor, pageSize, controller.signal)
+    fetchEventsPage({ period, service, country, minScore }, cursor, pageSize, controller.signal)
       .then((result) => {
         setNextCursor(result.nextCursor);
         setState(result.items.length === 0 ? { status: "empty" } : { status: "ready", data: result.items });
@@ -53,7 +53,7 @@ export function useEventsPage(
         setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
       });
     return () => controller.abort();
-  }, [period, service, country, cursor, pageSize, reloadKey]);
+  }, [period, service, country, minScore, cursor, pageSize, reloadKey]);
 
   const next = useCallback(() => {
     if (nextCursor) setStack({ key: filtersKey, cursors: [...cursors, nextCursor] });

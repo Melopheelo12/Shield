@@ -17,9 +17,9 @@ afterEach(() => vi.unstubAllGlobals());
 describe("fetchEventsPage — pagination par curseur", () => {
   it("transmet filtres, curseur et limite à l'API", async () => {
     const fetchMock = mockFetch({ items: [], count: 0 });
-    await fetchEventsPage({ period: "all", service: "ssh", country: "FR" }, "abc", 50);
+    await fetchEventsPage({ period: "all", service: "ssh", country: "FR", minScore: 60 }, "abc", 50);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/events?service=ssh&country=FR&cursor=abc&limit=50",
+      "/api/v1/events?service=ssh&country=FR&min_score=60&cursor=abc&limit=50",
       expect.anything(),
     );
   });

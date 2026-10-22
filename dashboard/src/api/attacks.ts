@@ -39,6 +39,7 @@ export async function fetchEventsPage(
     {
       service: filters.service,
       country: filters.country,
+      min_score: filters.minScore || null,
       since,
       cursor,
       limit,
