@@ -1,0 +1,12 @@
+/*
+ * Polices embarquées dans le build : la CSP de nginx n'autorise que 'self',
+ * donc aucune police ne peut venir de Google Fonts. Sous-ensemble latin seul
+ * (accents français, œ, tirets compris) pour garder le bundle léger.
+ */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-700.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";

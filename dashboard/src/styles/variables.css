@@ -1,48 +1,45 @@
-/* Thème sombre par défaut : un poste de supervision reste ouvert des heures. */
+/*
+ * Thème du tableau de bord (design « SHIELD — Tableau de bord »).
+ * Sombre uniquement : un poste de supervision reste ouvert des heures.
+ */
 :root {
   color-scheme: dark;
-  --bg: #0b0e14;
-  --surface: #121722;
-  --surface-2: #182030;
-  --text: #e6e9ef;
-  --muted: #8a94a6;
-  --border: #232c3d;
-  --accent: #5b9dff;
+  --bg: #0b0e13;
+  --surface: #12161d;
+  --surface-2: #18202a;
+  --surface-sunken: #0e1217;
+  --surface-nav: #0f1318;
+  --surface-head: #10141a;
+  --text: #e7eaee;
+  --text-soft: #c9d0d9;
+  --muted: #8a96a6;
+  --muted-strong: #a3aebc;
+  --border: #1e2530;
+  --border-strong: #2a3340;
+  --accent: #3fd0b4;
+  --accent-strong: #7be3cf;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
 
-  --sev-low: #4cc38a;
-  --sev-medium: #f2c14e;
-  --sev-high: #f5884b;
-  --sev-critical: #f2555a;
+  /* Paliers de score : bleu < 30 ≤ ambre < 60 ≤ rouge. */
+  --sev-low: #8fbbff;
+  --sev-low-bg: #1a2533;
+  --sev-medium: #f2c26b;
+  --sev-medium-bg: #3a2e17;
+  --sev-high: #ff8a6e;
+  --sev-high-bg: #3a1f1a;
+  --sev-critical: #ff7a5c;
+  --sev-critical-bg: #3a1f1a;
+  --danger-border: #5a2a22;
+  --danger-bg: #2a1512;
 
-  --svc-ssh: #5b9dff;
+  --svc-ssh: #6ea8fe;
   --svc-http: #b48cff;
-  --svc-ftp: #3cc6c2;
+  --svc-ftp: #3fd0b4;
 
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --radius: 10px;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 12px;
+  --radius-sm: 8px;
   --gap: 16px;
-  --sidebar: 220px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f4f6fa;
-    --surface: #ffffff;
-    --surface-2: #eef1f6;
-    --text: #141821;
-    --muted: #5d6676;
-    --border: #dde2ea;
-    --accent: #2563eb;
-
-    --sev-low: #23864f;
-    --sev-medium: #a76d00;
-    --sev-high: #c2541b;
-    --sev-critical: #c62f35;
-
-    --svc-ssh: #2563eb;
-    --svc-http: #7c3aed;
-    --svc-ftp: #0e8f8b;
-  }
+  --sidebar: 232px;
 }

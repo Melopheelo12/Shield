@@ -5,6 +5,7 @@ const PATHS = {
   journal: "M4 4h16v2H4zm0 5h16v2H4zm0 5h10v2H4zm0 5h10v2H4z",
   defense: "M12 2 4 5v6c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5z",
   sandbox: "M7 2v2h1v5.6L3.3 18A2.6 2.6 0 0 0 5.6 22h12.8a2.6 2.6 0 0 0 2.3-4L16 9.6V4h1V2zm3 2h4v6.2l2.2 3.8H7.8L10 10.2z",
+  power: "M11 2h2v10h-2zM6.8 5.3l1.4 1.4a6 6 0 1 0 7.6 0l1.4-1.4a8 8 0 1 1-10.4 0z",
 } as const;
 
 export type IconName = keyof typeof PATHS;
