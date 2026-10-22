@@ -14,6 +14,9 @@
 #   docker compose stop decoy-ssh decoy-http decoy-ftp    arret d'urgence
 # =============================================================================
 
+# Port interne du relais edge → port public attaqué : les événements portent le second.
+x-decoy-public-ports: &decoy-public-ports "2222=${DECOY_SSH_PORT:-22},8080=${DECOY_HTTP_PORT:-80},2121=${DECOY_FTP_PORT:-21},4443=${DECOY_HTTPS_PORT:-443}"
+
 x-decoy-hardening: &decoy-hardening
   build:
     context: .
@@ -33,6 +36,7 @@ x-decoy-hardening: &decoy-hardening
     COLLECTOR_INGEST_URL: http://collector:8000/api/v1/ingest
     INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
     DECOY_PROXY_PROTOCOL: "1"
+    DECOY_PUBLIC_PORTS: *decoy-public-ports
   networks: [decoy_net, ingest_net]
   depends_on: [collector]
 
@@ -89,6 +93,7 @@ services:
       INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
       DECOY_SSH_BANNER: ${DECOY_SSH_BANNER:-SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4}
       DECOY_PROXY_PROTOCOL: "1"
+      DECOY_PUBLIC_PORTS: *decoy-public-ports
 
   decoy-http:
     <<: *decoy-hardening
@@ -104,6 +109,7 @@ services:
       INGEST_TOKEN: ${INGEST_TOKEN:?INGEST_TOKEN manquant}
       DECOY_FTP_BANNER: ${DECOY_FTP_BANNER:-220 (vsFTPd 3.0.5)}
       DECOY_PROXY_PROTOCOL: "1"
+      DECOY_PUBLIC_PORTS: *decoy-public-ports
 
   # --------------------------------------------------------- ZONE TRAITEMENT
   collector:
