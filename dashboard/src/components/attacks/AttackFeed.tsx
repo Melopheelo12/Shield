@@ -3,7 +3,7 @@ import { useApi } from "../../hooks/useApi";
 import { useEventStream } from "../../hooks/useEventStream";
 import type { NormalizedEvent } from "../../types/events";
 import { mergeFeed } from "../../utils/feed";
-import { formatAttackerText } from "../../utils/format";
+import { attemptSummary, formatAttackerText } from "../../utils/format";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
 import { LoadingState } from "../common/LoadingState";
@@ -38,20 +38,44 @@ export function AttackFeed({ limit = 12 }: { limit?: number }) {
   const previous = seen.current;
 
   return (
-    <ul className="feed" aria-live="polite">
-      {items.map((event) => (
-        <li key={event.event_id} className={previous && !previous.has(event.event_id) ? "feed__new" : undefined}>
-          <time className="mono muted" dateTime={event.occurred_at}>
-            {timeFormat.format(new Date(event.occurred_at))}
-          </time>
-          <span className={`service service--${event.service}`}>{event.service.toUpperCase()}</span>
-          <span className="truncate">
-            <span className="mono">{event.source_ip}</span>
-            {event.username && <span className="muted"> · {formatAttackerText(event.username, 24)}</span>}
-          </span>
-          <ThreatScore score={event.threat_score} />
-        </li>
-      ))}
-    </ul>
+    <div className="table-scroll feed">
+      <table className="data-table" aria-live="polite">
+        <thead>
+          <tr>
+            <th scope="col">Heure</th>
+            <th scope="col">Source</th>
+            <th scope="col">Leurre</th>
+            <th scope="col">Tentative</th>
+            <th scope="col">ATT&amp;CK</th>
+            <th scope="col" className="num">
+              Score
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((event) => (
+            <tr key={event.event_id} className={previous && !previous.has(event.event_id) ? "feed__new" : undefined}>
+              <td className="mono muted">
+                <time dateTime={event.occurred_at}>{timeFormat.format(new Date(event.occurred_at))}</time>
+              </td>
+              <td>
+                {event.country_code && <span className="cc">{event.country_code}</span>}
+                <span className="mono">{event.source_ip}</span>
+              </td>
+              <td>
+                <span className={`service service--${event.service}`}>{event.service.toUpperCase()}</span>
+              </td>
+              <td className="mono feed__attempt" title={attemptSummary(event)}>
+                {formatAttackerText(attemptSummary(event), 48)}
+              </td>
+              <td className="mono muted">{event.technique_id ?? "—"}</td>
+              <td className="num">
+                <ThreatScore score={event.threat_score} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
