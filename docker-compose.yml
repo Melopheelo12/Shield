@@ -204,7 +204,10 @@ networks:
     internal: true      # AUCUNE route vers Internet depuis la zone leurre
   ingest_net:
     internal: true      # seule route autorisee hors de la zone leurre
-  core_net: {}          # sortie Internet, restreinte par liste blanche au niveau hote
+  # Sortie Internet du traitement (collecteur, geoipupdate). PAS encore filtree : la
+  # liste blanche (regles DOCKER-USER vers AbuseIPDB, MaxMind, NVD, CISA KEV,
+  # Discord, SMTP, DNS) est a mettre en place sur le VPS (#106).
+  core_net: {}
   data_net:
     internal: true
   web_net: {}
