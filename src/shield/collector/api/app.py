@@ -32,10 +32,12 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from shield.collector.alerts import AlertService, Threshold
 from shield.collector.api.auth import (
@@ -67,6 +69,8 @@ RULES_PATH = Path(os.getenv("RULES_PATH", "rules/detection_rules.yaml"))
 INGEST_TOKEN = os.getenv("INGEST_TOKEN", "change-me-ingest-token")
 INGEST_PATH = "/api/v1/ingest"
 MAX_REJECTION_REASON_CHARS = 1000
+#: Un événement légitime pèse une douzaine de Kio (charge de 8 Kio au plus, en base64).
+MAX_INGEST_BODY_BYTES = 64 * 1024
 MAINTENANCE_INTERVAL_SECONDS = 86_400
 SESSION_CLOSING_INTERVAL_SECONDS = 60
 ENRICHMENT_INTERVAL_SECONDS = 30
@@ -218,6 +222,73 @@ def require_ingest_token(x_ingest_token: Annotated[str | None, Header()] = None)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=UNAUTHORIZED_DETAIL)
 
 
+async def record_rejected(repository: EventRepository, reason: str, raw_body: bytes) -> None:
+    """Trace un rejet ; un échec est journalisé, jamais propagé (la réponse ne change pas)."""
+    try:
+        await repository.record_rejected(reason[:MAX_REJECTION_REASON_CHARS], raw_body)
+    except Exception:
+        logger.exception("événement rejeté non tracé")
+
+
+class IngestGuard:
+    """Garde du point d'ingestion, **avant** que FastAPI ne lise le corps (#54).
+
+    1. Le jeton est vérifié en premier : sans lui, 401 et rien n'est lu ni écrit (#63).
+    2. Le corps est plafonné à ``MAX_INGEST_BODY_BYTES`` : au-delà, 413, et le début
+       est tracé dans ``event_rejected`` — rejeté, mais jamais perdu. Sans plafond, un
+       corps de plusieurs Mo était décodé en entier avant d'être tronqué.
+    3. Le corps lu est rangé dans ``scope["state"]`` pour que le gestionnaire de
+       rejet trace les octets reçus, puis rejoué tel quel à l'application.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != INGEST_PATH or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope["headers"])
+        token = headers.get(b"x-ingest-token", b"").decode("latin-1") or None
+        if not is_valid_ingest_token(token):
+            response = JSONResponse({"detail": UNAUTHORIZED_DETAIL}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        body = bytearray()
+        more = True
+        while more and len(body) <= MAX_INGEST_BODY_BYTES:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body.extend(message.get("body", b""))
+            more = message.get("more_body", False)
+        if len(body) > MAX_INGEST_BODY_BYTES:
+            await record_rejected(
+                scope["app"].state.repository,
+                f"corps trop volumineux (plus de {MAX_INGEST_BODY_BYTES} octets)",
+                bytes(body),
+            )
+            response = JSONResponse({"detail": "request body too large"}, status_code=413)
+            await response(scope, receive, send)
+            return
+
+        scope.setdefault("state", {})["raw_body"] = bytes(body)
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
+app.add_middleware(IngestGuard)
+
+
 @app.exception_handler(RequestValidationError)
 async def trace_rejected_event(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Un événement malformé est rejeté (422) mais tracé dans ``event_rejected`` (§ 4.1).
@@ -228,6 +299,11 @@ async def trace_rejected_event(request: Request, exc: RequestValidationError) ->
     sans le bon jeton reçoit le même 401 qu'avec un corps valide, sans rien écrire (#63).
 
     Un échec de traçage est journalisé, jamais propagé — la réponse au leurre ne change pas.
+
+    On trace le corps **brut**, tel que ``IngestGuard`` l'a lu, et la réponse ne
+    renvoie pas l'entrée fautive (``input``) : la réencoder faisait déborder la pile
+    sur un JSON très imbriqué (#54), et renvoyer à l'émetteur ce qu'il a envoyé
+    n'apprend rien à un leurre légitime.
     """
     if request.url.path == INGEST_PATH:
         if not is_valid_ingest_token(request.headers.get("x-ingest-token")):
@@ -238,13 +314,13 @@ async def trace_rejected_event(request: Request, exc: RequestValidationError) ->
         reason = "; ".join(
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
             for error in exc.errors()
-        )[:MAX_REJECTION_REASON_CHARS]
-        body = exc.body
-        raw_body = body if isinstance(body, bytes) else json.dumps(body, default=str).encode()
-        try:
-            await request.app.state.repository.record_rejected(reason, raw_body)
-        except Exception:
-            logger.exception("événement rejeté non tracé")
+        )
+        raw_body = getattr(request.state, "raw_body", None)
+        if raw_body is None:  # pragma: no cover - IngestGuard le fournit toujours
+            raw_body = json.dumps(exc.body, default=str).encode()
+        await record_rejected(request.app.state.repository, reason, raw_body)
+        errors = [{k: v for k, v in error.items() if k != "input"} for error in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
     return await request_validation_exception_handler(request, exc)
 
 
