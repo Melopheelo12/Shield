@@ -865,3 +865,30 @@ button:disabled {
   margin: 0;
   color: var(--sev-critical);
 }
+
+/* ------------------------------------------------------------------- export */
+
+.filter-bar .checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.export-result {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.export-result--ok {
+  border-color: var(--sev-low);
+}
+
+.export-result--warn {
+  border-color: var(--sev-critical);
+  color: var(--sev-critical);
+}
