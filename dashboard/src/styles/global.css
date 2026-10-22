@@ -989,3 +989,117 @@ button:disabled {
 .grid > p[role="status"]:empty {
   display: none;
 }
+
+/* ------------------------------------------------- répartition par leurre */
+
+.split {
+  display: grid;
+  gap: 18px;
+}
+
+.split__bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.split__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.split__list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.split__swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.split__label {
+  display: grid;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.split__label strong {
+  font-weight: 500;
+}
+
+.split__label .muted {
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- activité */
+
+.activity__plot {
+  display: flex;
+  gap: 12px;
+  height: 210px;
+}
+
+.activity__axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 28px;
+  padding-bottom: 22px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.activity__body {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity__bars {
+  flex-grow: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--border-strong);
+  background-image: linear-gradient(#1a212b 1px, transparent 1px);
+  background-size: 100% 33.33%;
+}
+
+.activity__bar {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 1px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+}
+
+/* Tranche contenant au moins une tentative au-dessus du seuil d'alerte (60). */
+.activity__bar--high,
+.activity__bar--critical {
+  background: var(--sev-high);
+}
+
+.activity__ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
