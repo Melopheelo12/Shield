@@ -33,8 +33,9 @@ fi
 
 SHIELD_URL=${SHIELD_URL:-https://127.0.0.1:8443}
 BLOCKLIST_TOKEN=${BLOCKLIST_TOKEN:-}
+# Ports tels que le client les vise, côté hôte (avant toute traduction par Docker).
 PROTECTED_PORTS=${PROTECTED_PORTS:-8443}
-DECOY_PORTS=${DECOY_PORTS:-22 80 21}
+DECOY_PORTS=${DECOY_PORTS:-22 80 21 443}
 ALLOWLIST=${ALLOWLIST:-}
 MIN_SCORE=${MIN_SCORE:-60}
 DAYS=${DAYS:-7}
@@ -74,9 +75,24 @@ is_ipv4() {
   for octet in "${octets[@]}"; do ((10#$octet <= 255)) || return 1; done
 }
 
+# Une adresse que nft refuserait (« :::::: ») ferait échouer TOUTE mise à jour (#99) :
+# au plus un « :: », pas de « : » isolé en bord, 8 groupes de 1 à 4 chiffres hexadécimaux.
 is_ipv6() {
-  local ip=$1
-  [[ ${#ip} -le 39 && "$ip" == *:* && "$ip" =~ ^[0-9a-fA-F:]+$ ]]
+  local ip=${1,,} group count=0
+  [[ ${#ip} -le 39 && "$ip" == *:* && "$ip" =~ ^[0-9a-f:]+$ ]] || return 1
+  [[ "$ip" != *:::* ]] || return 1
+  local rest=${ip/::/}
+  [[ "$rest" != *::* ]] || return 1
+  if [[ "$ip" == :* && "$ip" != ::* ]] || [[ "$ip" == *: && "$ip" != *:: ]]; then
+    return 1
+  fi
+  IFS=: read -r -a groups <<<"$ip"
+  for group in "${groups[@]}"; do
+    [[ -n "$group" ]] || continue
+    ((${#group} <= 4)) || return 1
+    count=$((count + 1))
+  done
+  if [[ "$ip" == *::* ]]; then ((count <= 7)); else ((count == 8)); fi
 }
 
 # Jamais bloquées : privées (RFC 1918), bouclage, locales, CGNAT, multidiffusion.
@@ -143,14 +159,16 @@ trap 'rm -f "$ruleset"' EXIT
   echo "  set allow6 { type ipv6_addr; flags interval; auto-merge; $(elements "${allow6[@]}") }"
   echo "  set hostile4 { type ipv4_addr; $(elements "${hostile4[@]}") }"
   echo "  set hostile6 { type ipv6_addr; $(elements "${hostile6[@]}") }"
-  # input : services de l'hôte ; forward : ports publiés par Docker (après DNAT).
+  # input : services de l'hôte ; forward : ports publiés par Docker. Dans forward, le
+  # port a déjà été réécrit par le DNAT de Docker (22 → 2222 du relais des leurres) :
+  # on filtre donc sur le port D'ORIGINE, celui que vise le client (#99).
   for hook in input forward; do
     echo "  chain $hook {"
     echo "    type filter hook $hook priority filter - 10; policy accept;"
     echo "    ip saddr @allow4 return"
     echo "    ip6 saddr @allow6 return"
-    echo "    tcp dport { $port_set } ip saddr @hostile4 counter drop"
-    echo "    tcp dport { $port_set } ip6 saddr @hostile6 counter drop"
+    echo "    meta l4proto tcp ct original proto-dst { $port_set } ip saddr @hostile4 counter drop"
+    echo "    meta l4proto tcp ct original proto-dst { $port_set } ip6 saddr @hostile6 counter drop"
     echo "  }"
   done
   echo "}"

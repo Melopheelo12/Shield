@@ -6,11 +6,13 @@ from shield.collector.defender.engine import (
     ThreatProfiler,
     build_context,
 )
+from shield.collector.defender.reloader import RuleReloader
 
 __all__ = [
     "DefenderAgent",
     "Rule",
     "RuleEngine",
+    "RuleReloader",
     "ScoreCalculator",
     "ThreatProfiler",
     "build_context",

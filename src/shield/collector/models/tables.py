@@ -227,6 +227,22 @@ class Alert(Base):
     threshold: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")
     muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 004_alerting.sql
+    threshold_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    channels: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class AlertThreshold(Base):
+    """Seuil d'alerte modifiable depuis l'interface (US-31). Voir 004_alerting.sql."""
+
+    __tablename__ = "alert_threshold"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    metric: Mapped[str] = mapped_column(String(32))
+    threshold: Mapped[float] = mapped_column(Numeric)
+    window_seconds: Mapped[int] = mapped_column(Integer)
+    silence_seconds: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class BlocklistEntry(Base):

@@ -16,12 +16,32 @@ Les compteurs de fenêtre glissante sont calculés ici en SQL (index
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
 import logging
+import os
+import re
 from datetime import UTC, date, datetime, timedelta
 from ipaddress import ip_address
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, distinct, func, insert, or_, select, text, update
+from sqlalchemy import (
+    Select,
+    and_,
+    case,
+    delete,
+    distinct,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import InstrumentedAttribute
@@ -30,6 +50,9 @@ from sqlalchemy.sql import ColumnElement
 from shield.collector.defender import Rule
 from shield.collector.ingest.session_tracker import ResumedSession
 from shield.collector.models import (
+    Alert,
+    AlertThreshold,
+    CveWatch,
     DecoyService,
     DetectionRule,
     Event,
@@ -40,7 +63,15 @@ from shield.collector.models import (
 )
 from shield.collector.models import RuleMatch as RuleMatchRow
 from shield.collector.models import Session as SessionRow
-from shield.collector.repositories.base import MAX_REJECTED_BODY_BYTES, service_percentages
+from shield.collector.repositories.base import (
+    MAX_REJECTED_BODY_BYTES,
+    MAX_SESSION_EVENTS,
+    TIMELINE_ORIGIN,
+    country_ranking,
+    rule_summary,
+    service_percentages,
+    session_payload,
+)
 from shield.common.schema import (
     AttackerProfile,
     EnrichmentStatus,
@@ -57,6 +88,9 @@ logger = logging.getLogger(__name__)
 #: Partitions mensuelles d'``event`` créées d'avance, en plus de celle du mois courant.
 PARTITION_MONTHS_AHEAD = 2
 
+#: Nom des partitions créées par ``create_event_partition`` : event_AAAA_MM.
+_PARTITION_NAME = re.compile(r"event_(\d{4})_(\d{2})")
+
 _RULE_COLUMNS = (
     "name",
     "description",
@@ -68,6 +102,15 @@ _RULE_COLUMNS = (
     "enabled",
     "version",
 )
+
+
+def _fsync(path: Path) -> None:
+    """Force l'écriture d'un fichier — ou d'une entrée de dossier — sur le disque."""
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _pg_text(value: str) -> str:
@@ -169,7 +212,13 @@ class PostgresEventRepository:
 
         async with self._sessions.begin() as db:
             intel = pg_insert(IpIntel).values(
-                ip=ip, first_seen=seen_at, last_seen=seen_at, total_events=1
+                ip=ip,
+                first_seen=seen_at,
+                last_seen=seen_at,
+                total_events=1,
+                country_code=event.country_code,
+                asn=event.asn,
+                as_org=_pg_text(event.as_org) if event.as_org else None,
             )
             await db.execute(
                 intel.on_conflict_do_update(
@@ -178,6 +227,11 @@ class PostgresEventRepository:
                         "first_seen": func.least(IpIntel.first_seen, intel.excluded.first_seen),
                         "last_seen": func.greatest(IpIntel.last_seen, intel.excluded.last_seen),
                         "total_events": IpIntel.total_events + 1,
+                        # Une base GeoLite2 plus récente corrige ; une base absente n'efface rien.
+                        **{
+                            column: func.coalesce(intel.excluded[column], getattr(IpIntel, column))
+                            for column in ("country_code", "asn", "as_org")
+                        },
                     },
                 )
             )
@@ -332,6 +386,364 @@ class PostgresEventRepository:
             for session_id, source_ip, service, started_at, last_seen_at, event_count in rows
         ]
 
+    # -- enrichissement différé -------------------------------------------------
+
+    async def pending_reputation(self, limit: int) -> list[str]:
+        """Index partiel ``event_enrichment_pending_idx`` (003_enrichment.sql)."""
+        latest = func.max(Event.occurred_at)
+        stmt = (
+            select(Event.source_ip)
+            .where(Event.enrichment_status != EnrichmentStatus.DONE.value)
+            .group_by(Event.source_ip)
+            .order_by(latest.desc())
+            .limit(limit)
+        )
+        async with self._sessions() as db:
+            return [str(ip) for ip in (await db.execute(stmt)).scalars()]
+
+    async def apply_reputation(self, ip: str, score: int | None) -> None:
+        async with self._sessions.begin() as db:
+            if score is not None:
+                await db.execute(
+                    update(IpIntel)
+                    .where(IpIntel.ip == ip)
+                    .values(reputation_score=score, reputation_checked_at=datetime.now(UTC))
+                )
+            await db.execute(
+                update(Event)
+                .where(
+                    Event.source_ip == ip,
+                    Event.enrichment_status != EnrichmentStatus.DONE.value,
+                )
+                .values(enrichment_status=EnrichmentStatus.DONE.value)
+                .execution_options(synchronize_session=False)
+            )
+
+    # -- liste de blocage et conservation ---------------------------------------
+
+    async def hostile_ips(self, min_score: int, since: datetime) -> list[str]:
+        worst = func.max(Event.threat_score)
+        stmt = (
+            select(Event.source_ip)
+            .where(Event.occurred_at >= since)
+            .group_by(Event.source_ip)
+            .having(worst >= min_score)
+            .order_by(worst.desc(), Event.source_ip)
+        )
+        async with self._sessions() as db:
+            return [str(ip) for ip in (await db.execute(stmt)).scalars()]
+
+    async def purge(self, cutoff: datetime) -> dict[str, int]:
+        """US-46 : supprime tout ce qui précède ``cutoff``, et le journalise.
+
+        Une partition mensuelle entièrement expirée part en un ``DROP`` instantané —
+        c'est la raison du partitionnement. Le reste (mois partiellement expiré,
+        ``event_default``) passe par un ``DELETE`` ciblé.
+        """
+        summary: dict[str, int] = {}
+        async with self._sessions.begin() as db:
+            for name, _, first_day_after in await self._event_partitions(db):
+                if first_day_after > cutoff.date():
+                    continue
+                # Nom vérifié par l'expression régulière : aucune donnée externe ici.
+                count_sql = f'SELECT count(*) FROM "{name}"'  # noqa: S608  # nosec B608
+                rows = (await db.execute(text(count_sql))).scalar_one()
+                await db.execute(text(f'DROP TABLE "{name}"'))
+                await self._log_retention(db, cutoff, name, rows)
+                summary[name] = rows
+
+            result = await db.execute(delete(Event).where(Event.occurred_at < cutoff))
+            deleted: int = result.rowcount  # type: ignore[attr-defined]
+            await self._log_retention(db, cutoff, None, deleted)
+            summary["event"] = deleted
+
+            last_activity = func.coalesce(SessionRow.ended_at, SessionRow.started_at)
+            rejected_before = EventRejected.received_at < cutoff
+            for label, stmt in (
+                ("session", delete(SessionRow).where(last_activity < cutoff)),
+                ("ip_intel", delete(IpIntel).where(IpIntel.last_seen < cutoff)),
+                ("event_rejected", delete(EventRejected).where(rejected_before)),
+                ("alert", delete(Alert).where(Alert.triggered_at < cutoff)),
+            ):
+                result = await db.execute(stmt)
+                summary[label] = result.rowcount  # type: ignore[attr-defined]
+        logger.info("purge RGPD avant %s : %s", cutoff.date(), summary)
+        return summary
+
+    @staticmethod
+    async def _event_partitions(db: AsyncSession) -> list[tuple[str, date, date]]:
+        """Partitions mensuelles d'``event`` : (nom, premier jour, premier jour suivant).
+
+        ``event_default`` et tout nom inattendu sont ignorés : seul un nom vérifié par
+        ``_PARTITION_NAME`` peut ensuite apparaître dans une requête.
+        """
+        children = await db.execute(
+            text(
+                "SELECT c.relname FROM pg_inherits i "
+                "JOIN pg_class c ON c.oid = i.inhrelid "
+                "WHERE i.inhparent = 'event'::regclass"
+            )
+        )
+        partitions = []
+        for name in sorted(children.scalars()):
+            found = _PARTITION_NAME.fullmatch(name)
+            if found is None:
+                continue
+            year, month = int(found[1]), int(found[2])
+            first_day = date(year, month, 1)
+            partitions.append((name, first_day, date(year + month // 12, month % 12 + 1, 1)))
+        return partitions
+
+    async def lighten_payloads(self, before: datetime) -> int:
+        """Efface la charge utile des événements antérieurs à ``before``. L'empreinte reste."""
+        async with self._sessions.begin() as db:
+            result = await db.execute(
+                update(Event)
+                .where(Event.occurred_at < before, Event.payload_excerpt.is_not(None))
+                .values(payload_excerpt=None)
+                .execution_options(synchronize_session=False)
+            )
+        lightened: int = result.rowcount  # type: ignore[attr-defined]
+        return lightened
+
+    async def archive_partitions(self, before: date, directory: Path) -> list[dict[str, Any]]:
+        """Archive puis supprime chaque partition mensuelle entièrement antérieure à ``before``.
+
+        Ordre de sûreté :
+
+        1. le fichier est écrit sous un nom temporaire, synchronisé sur le disque
+           (``fsync``), puis renommé ; le dossier est synchronisé à son tour (#100) ;
+        2. la partition est verrouillée en ``SHARE`` **avant** le comptage : une insertion
+           en cours fait attendre le verrou, puis compte — sans ce verrou, une ligne
+           validée entre le comptage et le ``DROP`` disparaissait sans être archivée ;
+        3. le nombre de lignes copiées est comparé à celui de la partition, dans la même
+           transaction que le ``DROP``. Au moindre écart, rien n'est supprimé.
+        """
+        async with self._sessions() as db:
+            eligible = [name for name, _, end in await self._event_partitions(db) if end <= before]
+        archived = []
+        for name in eligible:
+            path = directory / f"{name}.csv.gz"
+            copied, digest = await self._copy_partition(name, path)
+            async with self._sessions.begin() as db:
+                # Nom vérifié par _PARTITION_NAME : aucune donnée externe dans ces requêtes.
+                await db.execute(text(f'LOCK TABLE "{name}" IN SHARE MODE'))
+                count_sql = f'SELECT count(*) FROM "{name}"'  # noqa: S608  # nosec B608
+                rows = (await db.execute(text(count_sql))).scalar_one()
+                if rows != copied:
+                    logger.error(
+                        "archive %s : %s lignes copiées, %s en base — rien supprimé",
+                        name,
+                        copied,
+                        rows,
+                    )
+                    continue
+                await db.execute(text(f'DROP TABLE "{name}"'))
+                await self._log_retention(
+                    db, datetime.combine(before, datetime.min.time(), UTC), f"archive:{name}", rows
+                )
+            manifest = {
+                "partition": name,
+                "rows": rows,
+                "sha256": digest,
+                "archived_at": datetime.now(UTC).isoformat(),
+                "file": path.name,
+            }
+            manifest_path = directory / f"{name}.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2), "utf-8")
+            _fsync(manifest_path)
+            _fsync(directory)
+            archived.append(manifest)
+            logger.info("partition %s archivée : %s lignes → %s", name, rows, path)
+        return archived
+
+    async def _copy_partition(self, name: str, path: Path) -> tuple[int, str]:
+        """``COPY … TO STDOUT`` en CSV compressé. Retourne (lignes copiées, SHA-256 du fichier)."""
+        temporary = path.with_name(path.name + ".tmp")
+        digest = hashlib.sha256()
+        # Nom vérifié par _PARTITION_NAME. Le service est joint : l'archive se lit seule.
+        query = (
+            f'SELECT e.*, s.name AS service FROM "{name}" e '  # noqa: S608  # nosec B608
+            "JOIN decoy_service s ON s.id = e.service_id ORDER BY e.occurred_at, e.id"
+        )
+        async with self._engine.connect() as conn:
+            raw = await conn.get_raw_connection()
+            with gzip.open(temporary, "wb") as archive:
+
+                async def sink(chunk: bytes) -> None:
+                    archive.write(chunk)
+
+                status = await raw.driver_connection.copy_from_query(
+                    query, output=sink, format="csv", header=True
+                )
+        with temporary.open("rb") as written:
+            for block in iter(lambda: written.read(1 << 20), b""):
+                digest.update(block)
+        # Sur le disque avant le renommage, et le renommage lui-même avant le DROP (#100).
+        _fsync(temporary)
+        os.replace(temporary, path)
+        _fsync(path.parent)
+        return int(str(status).split()[-1]), digest.hexdigest()
+
+    async def storage_usage(self) -> list[dict[str, Any]]:
+        """Taille sur disque des tables, index compris, les plus lourdes d'abord."""
+        async with self._sessions() as db:
+            rows = await db.execute(
+                text(
+                    "SELECT c.relname, pg_total_relation_size(c.oid) "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind = 'r' AND n.nspname = current_schema() "
+                    "ORDER BY 2 DESC"
+                )
+            )
+            return [{"table": name, "bytes": size} for name, size in rows]
+
+    @staticmethod
+    async def _log_retention(
+        db: AsyncSession, cutoff: datetime, partition: str | None, rows: int
+    ) -> None:
+        await db.execute(
+            text(
+                "INSERT INTO retention_job (cutoff_date, partition, deleted_rows) "
+                "VALUES (:cutoff, :partition, :rows)"
+            ),
+            {"cutoff": cutoff.date(), "partition": partition, "rows": rows},
+        )
+
+    # -- veille (US-39, US-40) ---------------------------------------------------
+
+    async def upsert_watch(self, entries: list[dict[str, Any]]) -> None:
+        if not entries:
+            return
+        stmt = pg_insert(CveWatch).values(entries)
+        async with self._sessions.begin() as db:
+            await db.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=[CveWatch.cve_id],
+                    set_={
+                        "published_at": stmt.excluded.published_at,
+                        "summary": stmt.excluded.summary,
+                        "kev_flag": stmt.excluded.kev_flag,
+                    },
+                )
+            )
+
+    async def watch_entries(self, limit: int = 100) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                CveWatch.cve_id,
+                CveWatch.published_at,
+                CveWatch.summary,
+                CveWatch.kev_flag,
+                CveWatch.matched_events,
+                CveWatch.last_matched_at,
+            )
+            .order_by(
+                CveWatch.matched_events.desc(),
+                CveWatch.published_at.desc().nulls_last(),
+                CveWatch.cve_id,
+            )
+            .limit(limit)
+        )
+        async with self._sessions() as db:
+            return [dict(row._mapping) for row in await db.execute(stmt)]
+
+    _PAYLOAD_CONTAINS = "position(CAST(:marker AS bytea) IN event.payload_excerpt) > 0"
+
+    async def count_payload_matches(self, marker: bytes) -> tuple[int, datetime | None]:
+        stmt = select(func.count(), func.max(Event.occurred_at)).where(
+            text(self._PAYLOAD_CONTAINS).bindparams(marker=marker)
+        )
+        async with self._sessions() as db:
+            count, last = (await db.execute(stmt)).one()
+        return count, last
+
+    async def record_watch_matches(self, cve_id: str, count: int, last: datetime | None) -> None:
+        async with self._sessions.begin() as db:
+            await db.execute(
+                update(CveWatch)
+                .where(CveWatch.cve_id == cve_id)
+                .values(matched_events=count, last_matched_at=last)
+            )
+
+    async def events_with_payload(self, marker: bytes, limit: int) -> list[NormalizedEvent]:
+        stmt = (
+            self._event_select()
+            .where(text(self._PAYLOAD_CONTAINS).bindparams(marker=marker))
+            .order_by(Event.occurred_at.desc(), Event.id.desc())
+            .limit(limit)
+        )
+        return await self._fetch_events(stmt)
+
+    # -- alertes ----------------------------------------------------------------
+
+    _THRESHOLD_COLUMNS = (
+        "id",
+        "metric",
+        "threshold",
+        "window_seconds",
+        "silence_seconds",
+        "enabled",
+    )
+
+    async def load_alert_thresholds(self) -> list[dict[str, Any]]:
+        columns = [getattr(AlertThreshold, name) for name in self._THRESHOLD_COLUMNS]
+        async with self._sessions() as db:
+            rows = (await db.execute(select(*columns).order_by(AlertThreshold.id))).all()
+        return [
+            {**dict(zip(self._THRESHOLD_COLUMNS, row, strict=True)), "threshold": float(row[2])}
+            for row in rows
+        ]
+
+    async def save_alert_thresholds(self, thresholds: list[dict[str, Any]]) -> None:
+        async with self._sessions.begin() as db:
+            await db.execute(delete(AlertThreshold))
+            if thresholds:
+                await db.execute(
+                    insert(AlertThreshold),
+                    [{name: item[name] for name in self._THRESHOLD_COLUMNS} for item in thresholds],
+                )
+
+    async def record_alert(self, alert: dict[str, Any]) -> None:
+        async with self._sessions.begin() as db:
+            await db.execute(
+                insert(Alert).values(
+                    threshold_key=alert["threshold_id"],
+                    triggered_at=alert["triggered_at"],
+                    metric_value=alert["value"],
+                    threshold=alert["threshold"],
+                    status=alert["status"],
+                    channels=alert["channels"],
+                )
+            )
+
+    async def recent_alerts(self, limit: int = 50) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                Alert.threshold_key,
+                Alert.triggered_at,
+                Alert.metric_value,
+                Alert.threshold,
+                Alert.status,
+                Alert.channels,
+            )
+            .order_by(Alert.triggered_at.desc(), Alert.id.desc())
+            .limit(limit)
+        )
+        async with self._sessions() as db:
+            rows = (await db.execute(stmt)).all()
+        return [
+            {
+                "threshold_id": row.threshold_key,
+                "triggered_at": row.triggered_at,
+                "value": float(row.metric_value) if row.metric_value is not None else None,
+                "threshold": float(row.threshold) if row.threshold is not None else None,
+                "status": row.status,
+                "channels": row.channels,
+            }
+            for row in rows
+        ]
+
     # -- compteurs de fenêtre glissante -----------------------------------------
 
     async def counters(self, event: RawEvent) -> dict[str, int]:
@@ -364,8 +776,41 @@ class PostgresEventRepository:
         country: str | None = None,
         min_score: int = 0,
         limit: int = 50,
+        session_id: UUID | None = None,
     ) -> list[NormalizedEvent]:
         stmt = (
+            self._event_select()
+            .where(Event.threat_score >= min_score)
+            .order_by(Event.occurred_at.desc(), Event.id.desc())
+            .limit(limit)
+        )
+        if service is not None:
+            stmt = stmt.where(Event.service_id == self._service_ids[service])
+        if country is not None:
+            stmt = stmt.where(IpIntel.country_code == country)
+        if session_id is not None:
+            stmt = stmt.where(Event.session_id == session_id)
+        return await self._fetch_events(stmt)
+
+    async def export_page(
+        self,
+        since: datetime | None,
+        until: datetime | None,
+        cursor: tuple[datetime, UUID] | None,
+        limit: int,
+    ) -> list[NormalizedEvent]:
+        stmt = self._event_select().order_by(Event.occurred_at, Event.event_uid).limit(limit)
+        if since is not None:
+            stmt = stmt.where(Event.occurred_at >= since)
+        if until is not None:
+            stmt = stmt.where(Event.occurred_at < until)
+        if cursor is not None:
+            stmt = stmt.where(tuple_(Event.occurred_at, Event.event_uid) > tuple_(*cursor))
+        return await self._fetch_events(stmt)
+
+    @staticmethod
+    def _event_select() -> Select[Any]:
+        return (
             select(
                 Event,
                 DecoyService.name,
@@ -376,15 +821,9 @@ class PostgresEventRepository:
             )
             .join(DecoyService, DecoyService.id == Event.service_id)
             .outerjoin(IpIntel, IpIntel.ip == Event.source_ip)
-            .where(Event.threat_score >= min_score)
-            .order_by(Event.occurred_at.desc(), Event.id.desc())
-            .limit(limit)
         )
-        if service is not None:
-            stmt = stmt.where(Event.service_id == self._service_ids[service])
-        if country is not None:
-            stmt = stmt.where(IpIntel.country_code == country)
 
+    async def _fetch_events(self, stmt: Select[Any]) -> list[NormalizedEvent]:
         async with self._sessions() as db:
             rows = (await db.execute(stmt)).all()
 
@@ -463,6 +902,102 @@ class PostgresEventRepository:
             profile=AttackerProfile(found.attacker_profile),
             matches=matches,
         )
+
+    async def session_detail(self, session_id: UUID) -> dict[str, object] | None:
+        async with self._sessions() as db:
+            # Colonnes explicites : charger l'entité tirerait ses relations « selectin ».
+            session = (
+                await db.execute(
+                    select(
+                        SessionRow.source_ip,
+                        DecoyService.name.label("service"),
+                        SessionRow.started_at,
+                        SessionRow.ended_at,
+                        SessionRow.event_count,
+                        SessionRow.threat_score,
+                        SessionRow.attacker_profile,
+                        SessionRow.closed,
+                    )
+                    .join(DecoyService, DecoyService.id == SessionRow.service_id)
+                    .where(SessionRow.id == session_id)
+                )
+            ).first()
+            if session is None:
+                return None
+
+            # Filtrer par session sert l'index rule_match_session_idx.
+            total = func.sum(RuleMatchRow.contributed_score)
+            rows = await db.execute(
+                select(
+                    DetectionRule.rule_key,
+                    DetectionRule.name,
+                    DetectionRule.description,
+                    DetectionRule.severity,
+                    DetectionRule.weight,
+                    func.count(),
+                    total,
+                )
+                .join(DetectionRule, DetectionRule.id == RuleMatchRow.rule_id)
+                .where(RuleMatchRow.session_id == session_id)
+                .group_by(DetectionRule.id)
+            )
+            rules = [
+                rule_summary(
+                    RuleMatch(
+                        rule_id=rule_key,
+                        name=name,
+                        description=description,
+                        severity=Severity(severity),
+                        weight=weight,
+                        contribution=0,
+                    ),
+                    hits,
+                    int(contributed),
+                )
+                for rule_key, name, description, severity, weight, hits, contributed in rows
+            ]
+
+        return session_payload(
+            session_id=session_id,
+            source_ip=str(session.source_ip),
+            service=session.service,
+            started_at=session.started_at,
+            ended_at=session.ended_at,
+            event_count=session.event_count,
+            threat_score=session.threat_score,
+            attacker_profile=session.attacker_profile,
+            closed=session.closed,
+            events=await self.query(session_id=session_id, limit=MAX_SESSION_EVENTS),
+            rules=rules,
+        )
+
+    async def timeline(self, since: datetime, bucket: timedelta) -> list[dict[str, object]]:
+        # GROUP BY / ORDER BY par position : la même expression écrite deux fois
+        # porterait des paramètres distincts, que PostgreSQL ne reconnaît pas égaux.
+        start = func.date_bin(bucket, Event.occurred_at, TIMELINE_ORIGIN)
+        stmt = (
+            select(start, func.count(), func.max(Event.threat_score))
+            .where(Event.occurred_at >= since)
+            .group_by(text("1"))
+            .order_by(text("1"))
+        )
+        async with self._sessions() as db:
+            rows = (await db.execute(stmt)).all()
+        return [
+            {"bucket": moment.isoformat(), "events": count, "max_threat_score": worst}
+            for moment, count, worst in rows
+        ]
+
+    async def by_country(self) -> list[dict[str, object]]:
+        stmt = (
+            select(IpIntel.country_code, func.count(), func.count(distinct(Event.source_ip)))
+            .select_from(Event)
+            .outerjoin(IpIntel, IpIntel.ip == Event.source_ip)
+            .group_by(IpIntel.country_code)
+        )
+        async with self._sessions() as db:
+            rows = (await db.execute(stmt)).all()
+        return country_ranking([(country, events, ips) for country, events, ips in rows])
 
     async def overview(self) -> dict[str, int]:
         async with self._sessions() as db:

@@ -1,15 +1,16 @@
-import { Attacks } from "./pages/Attacks";
-import { Overview } from "./pages/Overview";
+import { AppShell } from "./components/layout/AppShell";
+import { useAuth } from "./hooks/useAuth";
+import { useHashRoute } from "./hooks/useHashRoute";
+import { Login } from "./pages/Login";
+import { findRoute } from "./routes";
 
-/**
- * Assemblage provisoire des vues, en attendant le routage et le shell
- * (`components/layout`). Vue d'ensemble puis journal des attaques.
- */
 export function App() {
+  const route = findRoute(useHashRoute());
+  const auth = useAuth();
+  if (!auth.authenticated) return <Login expired={auth.expired} onSuccess={auth.signedIn} />;
   return (
-    <>
-      <Overview />
-      <Attacks />
-    </>
+    <AppShell current={route.path} title={route.label}>
+      {route.render()}
+    </AppShell>
   );
 }
