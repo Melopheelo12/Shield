@@ -61,3 +61,16 @@ adresse de l'attaquant ; une connexion sans en-tête valide est fermée sans év
   protège pas non plus un poste de développement.
 - **Relais sans PROXY protocol** : tous les événements porteraient l'adresse du relais,
   ce qui viderait de sens l'enrichissement, les compteurs par adresse et les sessions.
+
+## Amendement du 2026-10-21 — un relais par rayon d'impact (#97)
+
+Le leurre HTTPS (port 443) termine le TLS avec le certificat du domaine. Placé dans
+`edge`, un certificat absent ou expiré empêchait nginx de démarrer et coupait **tous**
+les leurres. Décision de Ryan et Antho : **un relais par rayon d'impact**.
+
+- `edge` garde les ports 22, 80 et 21, sans certificat ni module TLS.
+- `edge-tls` publie le 443, monte le volume `certs` en lecture seule, termine le TLS et
+  relaie vers `decoy-http:8080` avec le même en-tête PROXY. Même durcissement que `edge`
+  (non-root, lecture seule, sans capacités), mêmes réseaux (`edge_net`, `decoy_net`).
+- Conséquence : un problème de certificat ne coûte que le leurre HTTPS. Un test sur
+  `docker-compose.yml` et `deploy/edge-tls.conf` vérifie cette séparation.

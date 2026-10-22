@@ -58,6 +58,27 @@ services:
     networks: [edge_net, decoy_net]
     depends_on: [decoy-ssh, decoy-http, decoy-ftp]
 
+  # Leurre HTTPS : relais a part (ADR 008, un relais par rayon d'impact). Sans
+  # certificat dans le volume certs, lui seul refuse de demarrer ; `edge` et les
+  # leurres SSH, HTTP et FTP n'en dependent pas (docs/HEBERGEMENT.md).
+  edge-tls:
+    image: nginx:1.27-alpine
+    container_name: shield-edge-tls
+    restart: unless-stopped
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=8m", "/var/cache/nginx:size=8m"]
+    volumes:
+      - ./deploy/edge-tls.conf:/etc/nginx/nginx.conf:ro
+      - certs:/etc/letsencrypt:ro
+    ports:
+      - "${DECOY_HTTPS_PORT:-443}:4443"
+    networks: [edge_net, decoy_net]
+    depends_on: [decoy-http]
+
   # ------------------------------------------------------------- ZONE LEURRE
   decoy-ssh:
     <<: *decoy-hardening
