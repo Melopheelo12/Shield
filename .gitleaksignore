@@ -4,3 +4,8 @@
 # il ne contient aucun secret. Le test le construit désormais à l'exécution ; cette
 # entrée ne couvre que l'ancien commit, encore présent dans l'historique de la branche.
 8836c3af2ba3847b436c770413577ab783bda9d5:tests/unit/test_auth.py:jwt:85
+#
+# Mot de passe d'exemple d'un test (#117), d'allure aléatoire mais inventé : il ne
+# protège rien. Le test utilise désormais "p" * 20 ; cette entrée ne couvre que
+# l'ancien commit de la branche.
+abd72a207f2438c42c44dd49e24f3184b271f2e2:tests/unit/test_auth.py:generic-api-key:177
