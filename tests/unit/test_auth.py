@@ -174,7 +174,8 @@ def test_un_succes_efface_les_echecs():
 SOLID = {
     "JWT_SECRET": "s" * 40,
     "ADMIN_USERNAME": "exploitant",
-    "ADMIN_PASSWORD": "Vq3-tR8z-Lm2x-Kp7w",
+    # Assez long pour la règle des 16 caractères, sans ressembler à un vrai secret (gitleaks).
+    "ADMIN_PASSWORD": "p" * 20,
     "INGEST_TOKEN": "jeton-d-ingestion-solide",
 }
 
