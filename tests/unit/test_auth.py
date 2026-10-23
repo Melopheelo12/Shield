@@ -171,23 +171,76 @@ def test_un_succes_efface_les_echecs():
     assert throttle.retry_after("a") == 0
 
 
-@pytest.mark.parametrize("weak", ["JWT_SECRET", "ADMIN_PASSWORD", "INGEST_TOKEN"])
-def test_la_production_refuse_les_secrets_d_exemple(monkeypatch, weak):
+SOLID = {
+    "JWT_SECRET": "s" * 40,
+    "ADMIN_USERNAME": "exploitant",
+    # Assez long pour la règle des 16 caractères, sans ressembler à un vrai secret (gitleaks).
+    "ADMIN_PASSWORD": "p" * 20,
+    "INGEST_TOKEN": "jeton-d-ingestion-solide",
+}
+
+
+@pytest.fixture
+def prod(monkeypatch):
     monkeypatch.setenv("SHIELD_ENV", "prod")
-    monkeypatch.setenv("JWT_SECRET", "s" * 40)
-    monkeypatch.setenv("ADMIN_PASSWORD", "solide")
-    monkeypatch.setenv("INGEST_TOKEN", "solide")
+    for name, value in SOLID.items():
+        monkeypatch.setenv(name, value)
+
+
+def test_la_production_accepte_des_identifiants_solides(prod):
+    assert auth.production_secret_problems(SOLID) == []
     auth.check_production_secrets()
 
+
+@pytest.mark.parametrize("weak", ["JWT_SECRET", "ADMIN_PASSWORD", "INGEST_TOKEN"])
+def test_la_production_refuse_les_secrets_d_exemple(prod, monkeypatch, weak):
     monkeypatch.setenv(weak, "change-me-quelque-chose-de-tres-long-pour-le-secret")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match=weak):
         auth.check_production_secrets()
 
 
-def test_la_production_refuse_un_secret_jwt_court(monkeypatch):
-    monkeypatch.setenv("SHIELD_ENV", "prod")
+def test_la_production_refuse_un_secret_jwt_court(prod, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "court")
-    monkeypatch.setenv("ADMIN_PASSWORD", "solide")
-    monkeypatch.setenv("INGEST_TOKEN", "solide")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
         auth.check_production_secrets()
+
+
+def test_la_production_refuse_un_mot_de_passe_court(prod, monkeypatch):
+    monkeypatch.setenv("ADMIN_PASSWORD", "Menuiserie2026!")  # 15 caractères
+    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD : moins de 16"):
+        auth.check_production_secrets()
+
+
+@pytest.mark.parametrize("username", ["admin", "Admin", "root", "administrator", " user "])
+def test_la_production_refuse_un_nom_d_utilisateur_courant(prod, monkeypatch, username):
+    monkeypatch.setenv("ADMIN_USERNAME", username)
+    with pytest.raises(RuntimeError, match="ADMIN_USERNAME"):
+        auth.check_production_secrets()
+
+
+def test_admin_par_defaut_est_refuse_en_production(prod, monkeypatch):
+    monkeypatch.delenv("ADMIN_USERNAME")
+    with pytest.raises(RuntimeError, match="ADMIN_USERNAME"):
+        auth.check_production_secrets()
+
+
+def test_la_production_refuse_un_mot_de_passe_contenant_le_nom(prod, monkeypatch):
+    monkeypatch.setenv("ADMIN_PASSWORD", "mot-de-passe-EXPLOITANT-2026")
+    with pytest.raises(RuntimeError, match="contient le nom"):
+        auth.check_production_secrets()
+
+
+def test_le_refus_ne_divulgue_aucune_valeur(prod, monkeypatch):
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secret-court")
+    with pytest.raises(RuntimeError) as refusal:
+        auth.check_production_secrets()
+    assert "secret-court" not in str(refusal.value)
+    assert SOLID["JWT_SECRET"] not in str(refusal.value)
+
+
+def test_le_developpement_garde_le_compte_de_dev(monkeypatch):
+    monkeypatch.setenv("SHIELD_ENV", "dev")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "dev-admin")
+    auth.check_production_secrets()

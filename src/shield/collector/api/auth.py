@@ -20,7 +20,7 @@ import os
 import secrets
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -37,6 +37,25 @@ FAILURE_WINDOW_SECONDS = 900.0
 FIRST_DELAY_SECONDS = 30.0
 MAX_DELAY_SECONDS = 900.0
 INSECURE_PREFIX = "change-me"
+MIN_JWT_SECRET_LENGTH = 32
+MIN_ADMIN_PASSWORD_LENGTH = 16
+# Les premiers noms qu'essaie un robot : en production, le compte doit en porter un autre.
+COMMON_USERNAMES = frozenset(
+    {
+        "admin",
+        "administrateur",
+        "administrator",
+        "guest",
+        "operator",
+        "root",
+        "shield",
+        "superuser",
+        "support",
+        "sysadmin",
+        "test",
+        "user",
+    }
+)
 
 
 def _jwt_secret() -> str:
@@ -48,18 +67,39 @@ def _ttl() -> timedelta:
     return timedelta(minutes=int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "30")))
 
 
+def production_secret_problems(env: Mapping[str, str]) -> list[str]:
+    """Ce qui empêche ``env`` de servir en production ; liste vide si tout va bien.
+
+    Les messages nomment les variables, jamais leur valeur : ils finissent dans les
+    journaux du conteneur.
+    """
+    problems = [
+        f"{name} : valeur d'exemple ou absente"
+        for name in ("JWT_SECRET", "ADMIN_PASSWORD", "INGEST_TOKEN")
+        if env.get(name, INSECURE_PREFIX).startswith(INSECURE_PREFIX)
+    ]
+    if len(env.get("JWT_SECRET", "")) < MIN_JWT_SECRET_LENGTH:
+        problems.append(f"JWT_SECRET : moins de {MIN_JWT_SECRET_LENGTH} caractères")
+    username = env.get("ADMIN_USERNAME", "admin")
+    password = env.get("ADMIN_PASSWORD", "")
+    if len(password) < MIN_ADMIN_PASSWORD_LENGTH:
+        problems.append(f"ADMIN_PASSWORD : moins de {MIN_ADMIN_PASSWORD_LENGTH} caractères")
+    if username.strip().lower() in COMMON_USERNAMES:
+        problems.append("ADMIN_USERNAME : nom trop courant, essayé en premier par les robots")
+    if len(username) >= 3 and username.lower() in password.lower():
+        problems.append("ADMIN_PASSWORD : contient le nom d'utilisateur")
+    return problems
+
+
 def check_production_secrets() -> None:
-    """En production, refuser de démarrer avec un secret d'exemple de ``.env.example``."""
+    """En production, refuser de démarrer avec des secrets d'exemple ou des identifiants faibles."""
     if os.getenv("SHIELD_ENV", "dev") != "prod":
         return
-    weak = [
-        name
-        for name in ("JWT_SECRET", "ADMIN_PASSWORD", "INGEST_TOKEN")
-        if os.getenv(name, INSECURE_PREFIX).startswith(INSECURE_PREFIX)
-    ]
-    if weak or len(_jwt_secret()) < 32:
+    problems = production_secret_problems(os.environ)
+    if problems:
         raise RuntimeError(
-            f"secrets d'exemple ou trop courts en production : {weak or ['JWT_SECRET']}"
+            "identifiants refusés en production (make secrets en génère de solides) : "
+            + " ; ".join(problems)
         )
 
 
