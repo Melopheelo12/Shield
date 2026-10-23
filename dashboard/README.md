@@ -9,11 +9,17 @@ React 18 + TypeScript + Vite. Thème sombre par défaut, aucune ressource extern
 
 ```bash
 make dev        # collecteur en mémoire + attaques factices + tableau de bord
+make demo       # idem + leurre WordPress sur :8080, flux factice réduit
 ```
 
 Le navigateur s'ouvre sur <http://localhost:5173> ; connectez-vous avec
 `admin` / `dev-admin` (compte de développement). `RATE=10 make dev` accélère
-les attaques simulées ; Ctrl+C arrête tout. Aucun leurre n'est exposé.
+les attaques simulées ; Ctrl+C arrête tout. `make dev` ne lance aucun leurre.
+
+Pour une présentation, `make demo` lance aussi le leurre HTTP sur
+<http://localhost:8080> : une attaque tapée à la main sur le faux WordPress
+(`/wp-login.php`, `/?id=1' OR 1=1--`, `/.env`) apparaît aussitôt dans le flux
+en direct, au milieu d'une attaque factice toutes les deux secondes.
 
 ## Les pages
 

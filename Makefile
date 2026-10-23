@@ -1,6 +1,6 @@
 SHIELD_STORAGE ?= postgres
 
-.PHONY: help install dev e2e lint format test test-integration test-cov types check run-api run-decoy fake load clean \
+.PHONY: help install dev demo e2e lint format test test-integration test-cov types check run-api run-decoy fake load clean \
 	qa qa-load qa-inputs qa-identity qa-egress
 
 help:  ## Affiche cette aide
@@ -40,6 +40,9 @@ check: lint test-cov  ## Tout ce que la CI vérifie, en local
 
 dev:  ## Démarre collecteur + attaques factices + tableau de bord (http://localhost:5173)
 	./scripts/dev.sh
+
+demo:  ## Comme dev, plus le leurre WordPress (http://localhost:8080) et un flux factice réduit
+	RATE=$${RATE:-0.5} DEMO_DECOY_PORT=$${DEMO_DECOY_PORT:-8080} ./scripts/dev.sh
 
 run-api:  ## Lance le collecteur en local (port 8000) ; SHIELD_STORAGE=memory pour se passer de base
 	INGEST_TOKEN=dev-token ADMIN_PASSWORD=$${ADMIN_PASSWORD:-dev-admin} \

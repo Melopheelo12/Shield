@@ -5,12 +5,15 @@
 #   make dev                      # ou ./scripts/dev.sh
 #   RATE=10 make dev              # 10 tentatives factices par seconde
 #   SHIELD_STORAGE=postgres DATABASE_URL=... make dev   # sur une vraie base
+#   make demo                     # + leurre WordPress sur :8080, flux factice réduit
 #
 # Lance le collecteur (en mémoire par défaut : aucune base à installer), le
 # générateur d'attaques factices et le tableau de bord, puis ouvre
-# http://localhost:5173. Ctrl+C arrête les trois.
+# http://localhost:5173. Ctrl+C arrête tout.
 #
-# Aucun leurre n'est exposé : les attaques sont simulées, en local seulement.
+# Sans DEMO_DECOY_PORT, aucun leurre n'est lancé : les attaques sont simulées.
+# Avec (make demo), le leurre HTTP tourne sur cette machine pour attaquer le
+# site à la main pendant une présentation et voir l'attaque arriver en direct.
 # =============================================================================
 set -euo pipefail
 
@@ -21,6 +24,7 @@ API_PORT=8000
 UI_PORT="${UI_PORT:-5173}"
 RATE="${RATE:-3}"
 STORAGE="${SHIELD_STORAGE:-memory}"
+DECOY_PORT="${DEMO_DECOY_PORT:-}"
 TOKEN="dev-token"
 # Compte de développement du tableau de bord (US-19), pour ce lancement local
 # seulement : en production, ADMIN_PASSWORD vient du .env.
@@ -31,9 +35,9 @@ die() { echo "ERREUR : $*" >&2; exit 1; }
 
 [[ -x .venv/bin/python ]] || die "environnement Python absent : lancez d'abord 'make install'."
 command -v npm >/dev/null || die "npm introuvable : installez Node.js 20."
-for port in "$API_PORT" "$UI_PORT"; do
+for port in "$API_PORT" "$UI_PORT" $DECOY_PORT; do
   if lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    die "le port $port est déjà utilisé (un 'make dev' tourne déjà ?)."
+    die "le port $port est déjà utilisé (un 'make dev' ou 'make demo' tourne déjà ?)."
   fi
 done
 
@@ -68,6 +72,13 @@ echo "==> Attaques factices : $RATE par seconde"
 .venv/bin/python -m shield.tools.fake_events --token "$TOKEN" --rate "$RATE" \
   --url "http://localhost:$API_PORT/api/v1/ingest" >/dev/null 2>&1 &
 pids+=($!)
+
+if [[ -n "$DECOY_PORT" ]]; then
+  echo "==> Leurre WordPress sur http://localhost:$DECOY_PORT (à attaquer à la main)"
+  INGEST_TOKEN="$TOKEN" COLLECTOR_INGEST_URL="http://localhost:$API_PORT/api/v1/ingest" \
+    .venv/bin/python -m shield.decoys.runner http --port "$DECOY_PORT" >/dev/null 2>&1 &
+  pids+=($!)
+fi
 
 echo "==> Tableau de bord sur http://localhost:$UI_PORT (connexion : $ADMIN_USER / $ADMIN_PASS)"
 (cd dashboard && exec npx vite --port "$UI_PORT" --strictPort --clearScreen false) &
