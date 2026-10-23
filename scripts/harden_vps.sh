@@ -10,12 +10,19 @@
 #
 # Idempotent : le relancer remet la machine dans l'etat attendu.
 #
+# Serveur deja occupe par une autre application : EXTRA_PORTS liste ses ports
+# TCP, qui restent ouverts (ufw et conteneurs Docker), par exemple :
+#
+#   EXTRA_PORTS="8765" ADMIN_USER=antho ADMIN_SSH_PORT=49222 ... ./scripts/harden_vps.sh
+#
+#
 # NE FERMEZ PAS la session courante avant d'avoir verifie, dans un SECOND
 # terminal, que `ssh -p $ADMIN_SSH_PORT $ADMIN_USER@<ip>` fonctionne.
 # =============================================================================
 set -euo pipefail
 
 DECOY_PORTS=(22 80 21 443)
+read -r -a EXTRA_PORTS <<< "${EXTRA_PORTS:-}"
 
 die() { echo "ERREUR : $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -37,6 +44,13 @@ step() { echo; echo "==> $*"; }
 for port in "${DECOY_PORTS[@]}"; do
   (( ADMIN_SSH_PORT != port )) || die "ADMIN_SSH_PORT ne peut pas etre un port de leurre ($port)."
 done
+for port in "${EXTRA_PORTS[@]}"; do
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) \
+    || die "EXTRA_PORTS : '$port' n'est pas un port TCP."
+  for taken in "${DECOY_PORTS[@]}" "$ADMIN_SSH_PORT"; do
+    (( port != taken )) || die "EXTRA_PORTS : $port est deja un port de leurre ou d'admin."
+  done
+done
 [[ "$ADMIN_PUBKEY" =~ ^(ssh-ed25519|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh.com|ssh-rsa)\  ]] \
   || die "ADMIN_PUBKEY ne ressemble pas a une cle publique OpenSSH."
 [[ "$ADMIN_PUBKEY" != *"PRIVATE KEY"* ]] || die "c'est une cle PRIVEE. Ne la copiez jamais sur le serveur."
@@ -44,13 +58,38 @@ done
 EXT_IFACE="$(ip -o route get 1.1.1.1 | awk '{for (i=1;i<NF;i++) if ($i=="dev") print $(i+1)}')"
 [[ -n "$EXT_IFACE" ]] || die "interface reseau externe introuvable."
 
+# ------------------------------------------------------------------ aucun secret
+
+# Verifie AVANT toute modification : sur un serveur deja en service (cle de
+# deploiement, cle TLS d'une autre application), un arret ici ne laisse ni le
+# pare-feu ni SSH a moitie reconfigures.
+step "Verification : aucun secret sur la machine"
+# node_modules et .venv embarquent parfois des cles de test : hors perimetre.
+found="$(grep -rlsE --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.git \
+  -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' /root /home 2>/dev/null || true)"
+if [[ -n "$found" ]]; then
+  echo "$found" >&2
+  die "cle(s) privee(s) trouvee(s) ci-dessus : deplacez-les hors de ce serveur, il sera attaque. Rien n'a ete modifie."
+fi
+for env_file in /home/*/Shield/.env /root/Shield/.env; do
+  [[ -f "$env_file" ]] && chmod 600 "$env_file"
+done
+
 # ------------------------------------------------------------------ paquets
 
 step "Mise a jour et paquets"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get upgrade -y -q
-apt-get install -y -q ufw unattended-upgrades docker.io docker-compose-v2 git
+apt-get install -y -q ufw unattended-upgrades git
+# Un Docker deja installe (souvent docker-ce, du depot de Docker) est garde tel quel :
+# docker.io d'Ubuntu entrerait en conflit avec lui et casserait ses conteneurs.
+if command -v docker >/dev/null 2>&1; then
+  docker compose version >/dev/null 2>&1 || die "Docker est installe sans 'docker compose' (v2)."
+  echo "Docker deja present : conserve."
+else
+  apt-get install -y -q docker.io docker-compose-v2
+fi
 
 # ------------------------------------------------------------------ compte admin
 
@@ -64,7 +103,9 @@ visudo -cf "/etc/sudoers.d/90-$ADMIN_USER" >/dev/null
 
 home="$(getent passwd "$ADMIN_USER" | cut -d: -f6)"
 install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "$home/.ssh"
-echo "$ADMIN_PUBKEY" > "$home/.ssh/authorized_keys"
+# Ajoutee si absente : les cles deja autorisees sur un compte existant restent valides.
+touch "$home/.ssh/authorized_keys"
+grep -qxF "$ADMIN_PUBKEY" "$home/.ssh/authorized_keys" || echo "$ADMIN_PUBKEY" >> "$home/.ssh/authorized_keys"
 chown "$ADMIN_USER:$ADMIN_USER" "$home/.ssh/authorized_keys"
 chmod 600 "$home/.ssh/authorized_keys"
 
@@ -102,20 +143,23 @@ systemctl enable ssh.service >/dev/null
 
 # ------------------------------------------------------------------ pare-feu
 
-step "Pare-feu : ${DECOY_PORTS[*]} (leurres) + $ADMIN_SSH_PORT (admin)"
+step "Pare-feu : ${DECOY_PORTS[*]} (leurres) + $ADMIN_SSH_PORT (admin) ${EXTRA_PORTS[*]:++ ${EXTRA_PORTS[*]} (autre application)}"
 # Le port d'admin est ouvert AVANT d'activer ufw : pas de coupure de session.
 ufw allow "$ADMIN_SSH_PORT/tcp" comment "ssh admin"
 for port in "${DECOY_PORTS[@]}"; do
   ufw allow "$port/tcp" comment "leurre SHIELD"
+done
+for port in "${EXTRA_PORTS[@]}"; do
+  ufw allow "$port/tcp" comment "autre application"
 done
 ufw default deny incoming
 ufw default allow outgoing
 
 # Docker publie ses ports en contournant ufw. La chaine DOCKER-USER, que Docker
 # ne touche jamais, refuse toute nouvelle connexion entrante vers un conteneur
-# sauf vers les ports de leurre. Consequence voulue : le 8443 du tableau de bord
-# n'est joignable que par tunnel SSH.
-python3 - "$EXT_IFACE" "${DECOY_PORTS[@]}" <<'PY'
+# sauf vers les ports de leurre (et EXTRA_PORTS). Consequence voulue : le 8443 du
+# tableau de bord n'est joignable que par tunnel SSH.
+python3 - "$EXT_IFACE" "${DECOY_PORTS[@]}" "${EXTRA_PORTS[@]}" <<'PY'
 import re, sys
 iface, ports = sys.argv[1], sys.argv[2:]
 rules = ["# BEGIN SHIELD DOCKER-USER", "*filter", ":DOCKER-USER - [0:0]", "-F DOCKER-USER",
@@ -153,20 +197,6 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:30";
 EOF
 systemctl enable --now unattended-upgrades >/dev/null
 unattended-upgrade --dry-run >/dev/null || die "unattended-upgrades mal configure."
-
-# ------------------------------------------------------------------ aucun secret
-
-step "Verification : aucun secret sur la machine"
-# node_modules et .venv embarquent parfois des cles de test : hors perimetre.
-found="$(grep -rlsE --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.git \
-  -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' /root /home 2>/dev/null || true)"
-if [[ -n "$found" ]]; then
-  echo "$found" >&2
-  die "cle(s) privee(s) trouvee(s) ci-dessus : supprimez-les, ce serveur sera attaque."
-fi
-for env_file in /home/*/Shield/.env /root/Shield/.env; do
-  [[ -f "$env_file" ]] && chmod 600 "$env_file"
-done
 
 # ------------------------------------------------------------------ redemarrage sshd
 

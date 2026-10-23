@@ -23,14 +23,22 @@ sortante** depuis la zone leurre. Ce que nous cherchons dans chaque AUP :
 | **OVHcloud VPS** | Pas d'interdiction des honeypots. Mais : « *the Client agrees to not use the VPS Service in a way that is detrimental to other OVHcloud clients or that harms the reputation of the Host Server's IP address* », et OVHcloud « *reserves the right to interrupt the VPS connection to the Internet* » s'il détecte un problème de sécurité. | 🟡 **Repli.** Autorisé sur le papier, mais leur détection automatique peut prendre nos leurres pour une machine compromise et couper le réseau. |
 | **DigitalOcean** | « *You may not […] conduct any security or malware research on or using the Services, without DigitalOcean's prior written consent.* » | ❌ **Exclu** sans accord écrit préalable. Un honeypot est de la recherche en sécurité. |
 | **Scaleway** | Conditions spécifiques Instances en PDF, non relues dans ce relevé. | ⏳ À lire si Hetzner et OVHcloud tombent. |
+| **IONOS** (relevé du 23/10) | Rien sur les honeypots ni la recherche en sécurité ; interdits : contenus piratés, minage. Le client doit protéger le serveur, et IONOS « *reserve[s] the right to disconnect the server from the network without prior notice* » en cas de manquement (§ 1.2.2). | ✅ **Retenu** : le serveur d'Antho existe déjà, et **le support a confirmé par écrit, le 23/10, que le honeypot est autorisé**. |
 
 Sources : [Hetzner — Cloud Server policy](https://www.hetzner.com/legal/cloud-server/),
 [Hetzner — System policies](https://www.hetzner.com/legal/system-policies/),
 [OVHcloud — Conditions particulières VPS v4.1](https://storage.gra.cloud.ovh.net/v1/AUTH_325716a587c64897acbef9a4a4726e38/contracts/7824b7f-Conditions_Particulieres_VPS-WE-4.1.pdf),
 [DigitalOcean — Acceptable Use Policy](https://www.digitalocean.com/legal/acceptable-use-policy),
-[Scaleway — Contrats](https://www.scaleway.com/en/contracts/).
+[Scaleway — Contrats](https://www.scaleway.com/en/contracts/),
+[IONOS — Conditions générales serveurs](https://www.ionos.com/terms-gtc/server/).
 
-## 3. Décision proposée
+## 3. Décision
+
+**23 octobre : IONOS**, sur le serveur d'Antho (8 vCPU, 16 Go, Ubuntu 24.04), avec
+l'accord écrit du support. Le serveur héberge déjà **une autre application, sur le
+port 8765** ; cohabitation et limites au § 4.1.
+
+Décision initiale (4 octobre), gardée en repli :
 
 - **Hébergeur principal : Hetzner Cloud** (le plus petit CX suffit : 2 vCPU, 4 Go).
 - **Repli : OVHcloud VPS**, en prévenant leur support *avant* la mise en ligne.
@@ -58,6 +66,35 @@ Le script :
 | Pare-feu : 22, 80, 21, 443 et le port d'admin | `ufw` refuse tout le reste en entrée. **Docker contourne `ufw`** pour les ports publiés : une chaîne `DOCKER-USER` bloque aussi tout port de conteneur autre que 22/80/21/443 (le 8443 de nginx n'est donc joignable que par tunnel SSH). |
 | Mises à jour de sécurité automatiques | `unattended-upgrades` limité à la source `-security`, redémarrage auto à 04:30 si nécessaire (les conteneurs repartent : `restart: unless-stopped`). |
 | Aucun secret sur la machine | Aucune clé privée créée ; `AllowAgentForwarding no` (personne ne peut réutiliser l'agent SSH d'un admin connecté) ; le script **échoue** s'il trouve une clé privée dans `/root` ou `/home`. Le `.env` est créé en `600`. |
+
+### 4.1 Serveur partagé avec une autre application
+
+Le script accepte `EXTRA_PORTS` : ces ports restent ouverts dans `ufw` et dans
+`DOCKER-USER`. Il refuse un port de leurre ou le port d'admin.
+
+```bash
+EXTRA_PORTS="8765" ADMIN_USER=antho ADMIN_SSH_PORT=49222 \
+ADMIN_PUBKEY="ssh-ed25519 AAAA… antho@portable" ./scripts/harden_vps.sh
+```
+
+Il ne casse pas l'existant : un Docker déjà installé est gardé (pas de `docker.io`
+par-dessus un `docker-ce`), la clé est **ajoutée** à `authorized_keys` sans effacer
+les autres, et la recherche de clés privées a lieu **avant** toute modification.
+
+Ce que le script impose quand même, à vérifier avec qui administre l'application :
+
+| Effet | Conséquence |
+| --- | --- |
+| SSH sur `ADMIN_SSH_PORT`, clé seule, `AllowUsers` = le seul compte d'admin | Tout autre compte qui se connectait en SSH ne le peut plus |
+| `ufw` refuse tout port non listé | Un port de l'application oublié dans `EXTRA_PORTS` est coupé |
+| Redémarrage automatique à 04:30 après une mise à jour de sécurité | L'application doit redémarrer seule (service systemd activé, ou `restart: unless-stopped`) |
+| Aucune clé privée dans `/root` ni `/home` | Une clé de déploiement de l'application doit être déplacée |
+
+Risque assumé : on attire des attaquants sur la machine qui héberge l'application.
+Les leurres sont isolés (conteneurs non privilégiés, réseau sans sortie, ADR 008),
+mais une évasion d'un leurre toucherait aussi l'application ; l'IP du serveur
+finira dans des listes de réputation. La défense active peut protéger le 8765 :
+l'ajouter à `PROTECTED_PORTS` (§ 7 de la recette).
 
 Accès au tableau de bord, uniquement par tunnel :
 
