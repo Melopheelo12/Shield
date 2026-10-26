@@ -12,7 +12,7 @@ export function EmergencyStop() {
       </p>
       <pre className="payload">./scripts/emergency_stop.sh</pre>
       <p className="muted">
-        Redémarrer ensuite : <code>docker compose start decoy-ssh decoy-http decoy-ftp</code>
+        Redémarrer ensuite : <code>docker compose up -d</code>
       </p>
     </div>
   );
