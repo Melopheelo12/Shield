@@ -106,10 +106,11 @@ ssh -p 49222 -L 8443:localhost:8443 antho@<ip-du-vps>
 ## 5. Mise en ligne et jalon J4
 
 ```bash
-git clone https://github.com/Melopheelo12/Shield.git && cd Shield
+# /opt/Shield : c'est le chemin du service de défense active (deploy/systemd/)
+git clone https://github.com/Melopheelo12/Shield.git /opt/Shield && cd /opt/Shield
 cp .env.example .env && chmod 600 .env   # puis générer de vrais secrets
 # nginx sert dashboard/dist : le construire avant (sinon page blanche / 403)
-docker run --rm -v "$PWD/dashboard:/app" -w /app node:20-alpine sh -c "npm ci && npm run build"
+docker run --rm -v "$PWD/dashboard:/app" -w /app node:22-alpine sh -c "npm ci && npm run build"
 docker compose up -d
 docker compose ps
 # premier événement réel (peut prendre de quelques minutes à une heure) :

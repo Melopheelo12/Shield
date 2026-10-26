@@ -1,6 +1,7 @@
 """Alertes (S4-01, S4-03, S4-10) : exactement une alerte par franchissement, canaux isolés."""
 
 import json
+import ssl
 from ipaddress import ip_address
 
 import httpx
@@ -8,7 +9,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from shield.collector.alerts import AlertManager, AlertService, Metric, Notifier, Threshold
-from shield.collector.alerts.channels import DiscordChannel, EmailChannel, overall_status
+from shield.collector.alerts.channels import (
+    DiscordChannel,
+    DiscordError,
+    EmailChannel,
+    overall_status,
+)
 from shield.collector.alerts.manager import filtered_view_url
 from shield.collector.api import app as api
 from shield.collector.api.auth import create_access_token
@@ -196,8 +202,51 @@ async def test_un_webhook_refuse_est_un_echec():
         "https://x",
         http=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404))),
     )
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(DiscordError):
         await channel.send(AlertManager().test_notice())
+
+
+async def test_un_webhook_refuse_ne_met_pas_son_jeton_dans_les_journaux(caplog):
+    """Les journaux du collecteur se collent dans une issue : le jeton n'y va jamais."""
+    channel = DiscordChannel(
+        "https://discord.example/api/webhooks/123/jeton-secret",
+        "https://x",
+        http=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404))),
+    )
+    results = await Notifier([channel]).send(AlertManager().test_notice())
+
+    assert results == {"discord": "failed"}
+    assert "HTTP 404" in caplog.text
+    assert "jeton-secret" not in caplog.text
+
+
+async def test_le_courriel_verifie_le_certificat_du_serveur(monkeypatch):
+    contexts = []
+
+    class FakeSmtp:
+        def __init__(self, host, port, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self, context=None):
+            contexts.append(context)
+
+        def send_message(self, message):
+            pass
+
+    monkeypatch.setattr("shield.collector.alerts.channels.smtplib.SMTP", FakeSmtp)
+    channel = EmailChannel("smtp.example", 587, "shield@x", "ops@x", "https://x")
+    await channel.send(AlertManager().test_notice())
+
+    [context] = contexts
+    assert context is not None, "sans contexte, smtplib ne vérifie rien"
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
 
 
 async def test_le_courriel_part_au_destinataire_configure(monkeypatch):
@@ -213,7 +262,7 @@ async def test_le_courriel_part_au_destinataire_configure(monkeypatch):
         def __exit__(self, *exc):
             return False
 
-        def starttls(self):
+        def starttls(self, context=None):
             pass
 
         def login(self, user, password):

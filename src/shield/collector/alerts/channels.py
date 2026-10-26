@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import smtplib
+import ssl
 from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Protocol
@@ -50,7 +51,18 @@ class DiscordChannel:
         else:
             async with httpx.AsyncClient(timeout=SEND_TIMEOUT_SECONDS) as http:
                 response = await http.post(self.webhook_url, json=payload)
-        response.raise_for_status()
+        if response.is_error:
+            # Pas raise_for_status() : son message contient l'URL, donc le jeton du
+            # webhook, et finirait dans les journaux du collecteur.
+            raise DiscordError(response.status_code)
+
+
+class DiscordError(Exception):
+    """Refus du webhook, décrit par son seul code HTTP."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"webhook Discord refusé : HTTP {status_code}")
+        self.status_code = status_code
 
 
 @dataclass
@@ -74,7 +86,9 @@ class EmailChannel:
 
     def _send_sync(self, message: EmailMessage) -> None:
         with smtplib.SMTP(self.host, self.port, timeout=SEND_TIMEOUT_SECONDS) as smtp:
-            smtp.starttls()
+            # Sans contexte, starttls() ne vérifie pas le certificat : un intermédiaire
+            # lirait SMTP_PASSWORD.
+            smtp.starttls(context=ssl.create_default_context())
             if self.username:
                 smtp.login(self.username, self.password)
             smtp.send_message(message)
