@@ -11,6 +11,7 @@ import pytest
 from shield.common.schema import MAX_PAYLOAD_BYTES
 from shield.decoys.ftp import FTPDecoy
 from shield.decoys.http import HTTPDecoy
+from shield.decoys.site import TRAP_PASSWORD
 from shield.decoys.ssh import SSHDecoy
 
 DECOY_SOURCES = list(Path("src/shield/decoys").glob("*.py"))
@@ -205,7 +206,7 @@ def test_identifiants_wordpress_xmlrpc_et_basic(request_bytes, expected):
 @pytest.mark.parametrize(
     "target,status,needle",
     [
-        ("/wp-config.php.bak", "200 OK", b"define( 'DB_PASSWORD', 'Copeaux.Chene4817' );"),
+        ("/wp-config.php.bak", "200 OK", f"'DB_PASSWORD', '{TRAP_PASSWORD}' );".encode()),
         ("/backup", "301 Moved Permanently", b"Location: /backup/"),
         ("/backup/", "200 OK", b'<h1>Index of /backup/</h1><hr><pre><a href="../">../</a>'),
         ("/backup/wordpress-2023-11-04.sql.gz", "403 Forbidden", b"<h1>403 Forbidden</h1>"),

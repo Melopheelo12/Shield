@@ -201,7 +201,8 @@ XMLRPC_FAULT = (
 
 #: Mot de passe piège du faux wp-config. Il n'existe nulle part ailleurs : quiconque
 #: l'essaie sur un leurre a lu ce fichier (R-021, rules/detection_rules.yaml).
-TRAP_PASSWORD = "Copeaux.Chene4817"  # noqa: S105 # nosec B105 - appât public, ne protège rien
+# Appât public, il ne protège rien : d'où les exemptions de ruff, bandit et gitleaks.
+TRAP_PASSWORD = "Copeaux.Chene4817"  # noqa: S105 # nosec B105 # gitleaks:allow
 
 #: Alphabet des clés de l'API secret-key de WordPress.
 _SALT_ALPHABET = (
