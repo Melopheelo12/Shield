@@ -9,10 +9,12 @@ import random
 from ipaddress import IPv4Address
 
 import pytest
+import yaml
 
 from shield.collector.defender import DefenderAgent, RuleEngine
 from shield.collector.enrichment.mitre import MitreMapper
 from shield.common.schema import AttackerProfile, NormalizedEvent, RawEvent, Severity
+from shield.decoys.site import BAIT_USER, TRAP_PASSWORD
 from shield.tools.fake_events import make_event
 
 AGENT = DefenderAgent(engine=RuleEngine.from_file("rules/detection_rules.yaml"))
@@ -64,6 +66,8 @@ EXPLOITATION = AttackerProfile.EXPLOITATION_ATTEMPT
         (b"GET /.env HTTP/1.1", "R-017", "T1083"),
         (b"GET /.git/config HTTP/1.1", "R-017", "T1083"),
         (b"GET /backup/id_rsa HTTP/1.1", "R-017", "T1083"),
+        (b"GET /wp-config.php.bak HTTP/1.1", "R-017", "T1083"),
+        (b"GET /backup/ HTTP/1.1", "R-017", "T1083"),
     ],
 )
 def test_les_exploits_reels_sont_reconnus_comme_tels(payload, rule, technique):
@@ -108,6 +112,33 @@ def test_le_compte_appat_signale_une_attaque_ciblee():
     assert "R-020" in {match.rule_id for match in verdict.matches}
     assert verdict.profile is AttackerProfile.TARGETED_BRUTEFORCE
     assert verdict.threat_score >= 30
+
+
+@pytest.mark.parametrize(
+    "service,username", [("http", "admin"), ("ssh", "root"), ("ftp", "wpuser")]
+)
+def test_le_mot_de_passe_piege_reutilise_declenche_une_alerte(service, username):
+    """US-50 : lu dans le faux wp-config, essayé sur n'importe quel leurre."""
+    _, verdict = verdict_for(service, username=username, password=TRAP_PASSWORD)
+    assert "R-021" in {match.rule_id for match in verdict.matches}
+    assert verdict.threat_score >= 60, "seuil d'alerte et de liste de blocage"
+    assert verdict.profile is AttackerProfile.TARGETED_BRUTEFORCE
+    assert verdict.is_consistent()
+
+
+def test_les_appats_des_regles_sont_ceux_du_site():
+    """R-020 et R-021 comparent à des valeurs recopiées de site.py : elles doivent suivre."""
+    values = {
+        rule["id"]: rule["condition"]["value"]
+        for rule in yaml.safe_load(open("rules/detection_rules.yaml", encoding="utf-8"))
+        if rule["id"] in ("R-020", "R-021")
+    }
+    assert values == {"R-020": BAIT_USER, "R-021": TRAP_PASSWORD}
+
+
+def test_un_mot_de_passe_voisin_du_piege_ne_declenche_pas_r021():
+    _, verdict = verdict_for("http", username="admin", password=TRAP_PASSWORD.lower())
+    assert "R-021" not in {match.rule_id for match in verdict.matches}
 
 
 @pytest.mark.parametrize("service", ["ftp", "http"])

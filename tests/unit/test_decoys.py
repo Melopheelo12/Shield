@@ -199,6 +199,81 @@ def test_identifiants_wordpress_xmlrpc_et_basic(request_bytes, expected):
     assert (parsed.get("username", ""), parsed.get("password", "")) == expected
 
 
+# --------------------------------------------------------------------------- faux système de fichiers (US-50)
+
+
+@pytest.mark.parametrize(
+    "target,status,needle",
+    [
+        ("/wp-config.php.bak", "200 OK", b"define( 'DB_PASSWORD', 'Copeaux.Chene4817' );"),
+        ("/backup", "301 Moved Permanently", b"Location: /backup/"),
+        ("/backup/", "200 OK", b'<h1>Index of /backup/</h1><hr><pre><a href="../">../</a>'),
+        ("/backup/wordpress-2023-11-04.sql.gz", "403 Forbidden", b"<h1>403 Forbidden</h1>"),
+        ("/backup/uploads-2023-11-04.tar.gz", "403 Forbidden", b"nginx/1.18.0</center>"),
+        ("/backup/autre.sql.gz", "404 Not Found", b"error404"),
+        ("/wp-content/uploads", "301 Moved Permanently", b"Location: /wp-content/uploads/"),
+        ("/wp-content/uploads/", "200 OK", b'<a href="2023/">2023/</a>'),
+        (
+            "/wp-content/uploads/2022",
+            "301 Moved Permanently",
+            b"Location: /wp-content/uploads/2022/",
+        ),
+        ("/wp-content/uploads/2022/", "403 Forbidden", b"<h1>403 Forbidden</h1>"),
+        ("/wp-content/uploads/2019/", "404 Not Found", b"error404"),
+        ("/wp-config.php", "404 Not Found", b"error404"),
+    ],
+)
+def test_le_faux_systeme_de_fichiers_repond_comme_nginx(target, status, needle):
+    response = http_decoy().render("GET", target)
+    assert status_of(response) == f"HTTP/1.1 {status}"
+    assert needle in response
+
+
+def test_le_listing_a_les_colonnes_de_l_autoindex_de_nginx():
+    body = http_decoy().render("GET", "/backup/").split(b"\r\n\r\n", 1)[1].decode()
+    line = next(row for row in body.split("\r\n") if "wordpress-2023" in row)
+    name = "wordpress-2023-11-04.sql.gz"
+    # Nom sur 50 colonnes, une espace, la date, puis la taille alignée à droite sur 19.
+    assert (
+        line
+        == f'<a href="{name}">{name}</a>{" " * (50 - len(name))} 04-Nov-2023 02:15 {4821307:>19}'
+    )
+
+
+@pytest.mark.parametrize(
+    "target", ["/wp-config.php.bak", "/backup/", "/backup", "/wp-content/uploads/2022/"]
+)
+def test_nginx_sert_ces_pages_sans_php(target):
+    """Un listing ou une 403 « propulsés par PHP » se trahiraient."""
+    head = http_decoy().render("GET", target).split(b"\r\n\r\n", 1)[0]
+    assert b"X-Powered-By" not in head
+    assert b"api.w.org" not in head
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        f"/backup/{MARKER}",
+        f"/backup/{MARKER}/",
+        f"/wp-content/uploads/{MARKER}/",
+        f"/backup/?{MARKER}",
+        f"/wp-config.php.bak?{MARKER}",
+    ],
+)
+def test_le_faux_systeme_de_fichiers_ne_reinjecte_rien(target):
+    for method in ("GET", "HEAD", "POST"):
+        assert MARKER.encode() not in http_decoy().render(method, target)
+
+
+def test_le_faux_wp_config_est_fixe_et_ne_trahit_rien():
+    first = http_decoy().render("GET", "/wp-config.php.bak").split(b"\r\n\r\n", 1)[1]
+    assert first == http_decoy().render("GET", "/wp-config.php.bak").split(b"\r\n\r\n", 1)[1]
+    text = first.decode()
+    assert text.count("define( '") == 16, "base (6), les 8 clés, WP_DEBUG et ABSPATH"
+    for needle in ("honeypot", "leurre", "shield", "decoy", "python"):
+        assert needle not in text.lower()
+
+
 async def test_une_vraie_connexion_au_leurre_http():
     """De bout en bout : requête TCP réelle, réponse WordPress, événement émis."""
     emitted: list[dict] = []
