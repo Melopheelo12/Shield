@@ -436,6 +436,9 @@
       - field: payload
         op: contains
         value: "phpinfo"
+      - field: payload
+        op: contains
+        value: "/backup/"
 
 - id: R-018
   name: bruteforce-other-services
@@ -490,3 +493,19 @@
     field: username
     op: eq
     value: atelier
+
+- id: R-021
+  name: trap-password-reused
+  description: >
+    Le mot de passe essayé n'existe que dans la fausse copie de configuration que
+    notre site laisse traîner. L'attaquant a exploré le site, lu ce fichier, puis
+    essayé le mot de passe qu'il y a trouvé : il réutilise un secret volé, ce
+    qu'aucun dictionnaire ne ferait.
+  severity: critical
+  weight: 60
+  profile_hint: force_brute_ciblee
+  # Doit rester égal à TRAP_PASSWORD (src/shield/decoys/site.py).
+  condition:
+    field: password
+    op: eq
+    value: "Copeaux.Chene4817"

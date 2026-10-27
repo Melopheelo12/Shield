@@ -22,11 +22,13 @@ Règles, vérifiées par les tests :
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from html import escape
 
 WORDPRESS_VERSION = "5.8.3"
+NGINX_VERSION = "nginx/1.18.0"
 DEFAULT_SITE_NAME = "Menuiserie des Tilleuls"
 
 HTML = "text/html; charset=UTF-8"
@@ -39,6 +41,8 @@ class Page:
     body: str = ""
     content_type: str = HTML
     headers: tuple[tuple[str, str], ...] = ()
+    #: Servie par nginx seul (fichier, listing, erreur) : pas d'en-tête de PHP.
+    static: bool = False
 
 
 def site_name() -> str:
@@ -189,6 +193,121 @@ XMLRPC_FAULT = (
     "      </struct>\n    </value>\n  </fault>\n</methodResponse>\n"
 )
 
+# --------------------------------------------------------------------------------------
+# Faux système de fichiers (US-50). Deux erreurs crédibles pour une petite entreprise :
+# une copie de wp-config oubliée et un dossier de sauvegardes listé par nginx. Pas plus :
+# un site qui exposerait aussi .env et .git se trahirait. Tout est fixe ; rien ne vient
+# de la requête.
+
+#: Mot de passe piège du faux wp-config. Il n'existe nulle part ailleurs : quiconque
+#: l'essaie sur un leurre a lu ce fichier (R-021, rules/detection_rules.yaml).
+# Appât public, il ne protège rien : d'où les exemptions de ruff, bandit et gitleaks.
+TRAP_PASSWORD = "Copeaux.Chene4817"  # noqa: S105 # nosec B105 # gitleaks:allow
+
+#: Alphabet des clés de l'API secret-key de WordPress.
+_SALT_ALPHABET = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_[]{}<>~+=,.;:/?|"
+)
+_SALT_NAMES = (
+    "AUTH_KEY",
+    "SECURE_AUTH_KEY",
+    "LOGGED_IN_KEY",
+    "NONCE_KEY",
+    "AUTH_SALT",
+    "SECURE_AUTH_SALT",
+    "LOGGED_IN_SALT",
+    "NONCE_SALT",
+)
+
+
+def _fake_salt(name: str) -> str:
+    """Clé de 64 caractères, fixe : dérivée de son nom, jamais tirée au hasard."""
+    digest = hashlib.sha512(f"salt:{name}".encode()).digest()
+    # ' et \ sont absents de l'alphabet : la chaîne PHP reste valide.
+    return "".join(_SALT_ALPHABET[byte % len(_SALT_ALPHABET)] for byte in digest)
+
+
+WP_CONFIG_BACKUP = (
+    "<?php\n/**\n * The base configuration for WordPress\n *\n"
+    " * @link https://wordpress.org/support/article/editing-wp-config-php/\n *\n"
+    " * @package WordPress\n */\n\n"
+    "// ** MySQL settings - You can get this info from your web host ** //\n"
+    "define( 'DB_NAME', 'wordpress' );\n"
+    "define( 'DB_USER', 'wpuser' );\n"
+    f"define( 'DB_PASSWORD', '{TRAP_PASSWORD}' );\n"
+    "define( 'DB_HOST', 'localhost' );\n"
+    "define( 'DB_CHARSET', 'utf8mb4' );\n"
+    "define( 'DB_COLLATE', '' );\n\n"
+    + "".join(f"define( '{name}', '{_fake_salt(name)}' );\n" for name in _SALT_NAMES)
+    + "\n$table_prefix = 'wp_';\n\n"
+    "define( 'WP_DEBUG', false );\n\n"
+    "if ( ! defined( 'ABSPATH' ) ) {\n\tdefine( 'ABSPATH', __DIR__ . '/' );\n}\n\n"
+    "require_once ABSPATH . 'wp-settings.php';\n"
+)
+
+#: Dossiers listés : chemin -> entrées (nom, date, taille ; None pour un dossier).
+_LISTINGS: dict[str, tuple[tuple[str, str, int | None], ...]] = {
+    "/backup/": (
+        ("uploads-2023-11-04.tar.gz", "04-Nov-2023 02:31", 734_003_200),
+        ("wordpress-2023-11-04.sql.gz", "04-Nov-2023 02:15", 4_821_307),
+    ),
+    "/wp-content/uploads/": (
+        ("2021/", "29-Dec-2021 16:40", None),
+        ("2022/", "14-Dec-2022 10:05", None),
+        ("2023/", "21-Oct-2023 09:12", None),
+    ),
+}
+#: Ce qu'un listing montre sans le servir : nginx refuse (``deny all``).
+_FORBIDDEN = frozenset(
+    directory + name for directory, entries in _LISTINGS.items() for name, _, _ in entries
+)
+
+#: Pages servies par nginx lui-même : sans PHP, sans en-tête WordPress.
+NGINX_HTML = "text/html"
+
+
+def _nginx_error(status: str) -> str:
+    return (
+        f"<html>\r\n<head><title>{status}</title></head>\r\n<body>\r\n"
+        f"<center><h1>{status}</h1></center>\r\n<hr><center>{NGINX_VERSION}</center>\r\n"
+        "</body>\r\n</html>\r\n"
+    )
+
+
+def _autoindex(directory: str) -> str:
+    """Listing au format de l'autoindex de nginx 1.18 (noms sur 50 colonnes)."""
+    lines = []
+    for name, date, size in _LISTINGS[directory]:
+        padding = " " * (50 - len(name))
+        size_column = f"{'-' if size is None else size:>19}"
+        lines.append(f'<a href="{name}">{name}</a>{padding} {date} {size_column}\r\n')
+    return (
+        f"<html>\r\n<head><title>Index of {directory}</title></head>\r\n<body>\r\n"
+        f'<h1>Index of {directory}</h1><hr><pre><a href="../">../</a>\r\n'
+        + "".join(lines)
+        + "</pre><hr></body>\r\n</html>\r\n"
+    )
+
+
+def _fake_file(path: str) -> Page | None:
+    """Réponse du faux système de fichiers, ou None si le chemin ne le concerne pas."""
+    if path == "/wp-config.php.bak":
+        # Extension inconnue de nginx : default_type, donc un téléchargement.
+        return Page("200 OK", WP_CONFIG_BACKUP, "application/octet-stream", static=True)
+    if path in _LISTINGS:
+        return Page("200 OK", _autoindex(path), NGINX_HTML, static=True)
+    if path + "/" in _LISTINGS or path + "/" in _FORBIDDEN:
+        # Dossier sans la barre finale : nginx redirige vers la forme canonique.
+        status = "301 Moved Permanently"
+        return Page(
+            status, _nginx_error(status), NGINX_HTML, (("Location", path + "/"),), static=True
+        )
+    if path in _FORBIDDEN:
+        status = "403 Forbidden"
+        return Page(status, _nginx_error(status), NGINX_HTML, static=True)
+    return None
+
+
 #: Comme WordPress : l'administration sans session renvoie vers la connexion.
 _REDIRECT_TO_LOGIN = (
     ("Location", "/wp-login.php?redirect_to=%2Fwp-admin%2F&reauth=1"),
@@ -231,4 +350,7 @@ def route(method: str, target: str) -> Page:
         return Page("200 OK", ROBOTS, "text/plain; charset=UTF-8")
     if path == "/wp-content/themes/twentytwentyone/style.css":
         return Page("200 OK", STYLE, "text/css")
+    fake = _fake_file(path)
+    if fake is not None:
+        return fake
     return Page("404 Not Found", not_found_page())

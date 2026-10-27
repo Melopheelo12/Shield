@@ -60,6 +60,7 @@ _DISCOVERY_MARKERS = (
     b"id_rsa",
     b"/.aws/",
     b"/.ssh/",
+    b"/backup/",
 )
 _EXPLOIT_MARKERS = (
     b"union select",

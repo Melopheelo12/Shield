@@ -23,7 +23,7 @@ from shield.decoys import site
 from shield.decoys.base import DecoyService
 
 #: Signature de version annoncée par défaut : un nginx et un PHP anciens, alléchants.
-DEFAULT_SERVER = "nginx/1.18.0"
+DEFAULT_SERVER = site.NGINX_VERSION
 POWERED_BY = "PHP/7.4.33"
 
 #: Champs d'identifiants reconnus : WordPress (``log``/``pwd``) et formulaires génériques.
@@ -68,8 +68,9 @@ class HTTPDecoy(DecoyService):
             ("Content-Type", page.content_type),
             ("Content-Length", str(len(page.body.encode("utf-8")))),
             ("Connection", "close"),
-            ("X-Powered-By", POWERED_BY),
         ]
+        if not page.static:
+            headers.append(("X-Powered-By", POWERED_BY))
         if page.content_type == site.HTML:
             headers.append(_WORDPRESS_LINK)
         if path.split("?", 1)[0] == "/wp-login.php":

@@ -9,3 +9,9 @@
 # protège rien. Le test utilise désormais "p" * 20 ; cette entrée ne couvre que
 # l'ancien commit de la branche.
 abd72a207f2438c42c44dd49e24f3184b271f2e2:tests/unit/test_auth.py:generic-api-key:177
+#
+# Mot de passe piège du faux wp-config (US-50, #123) : un appât public, voulu, qui ne
+# protège rien. site.py porte désormais « gitleaks:allow » et le test le lit depuis
+# site.py ; ces entrées ne couvrent que le premier commit de la branche.
+d64103311220d3346014fdff14239ca245c7874c:src/shield/decoys/site.py:generic-api-key:204
+d64103311220d3346014fdff14239ca245c7874c:tests/unit/test_decoys.py:generic-api-key:208
