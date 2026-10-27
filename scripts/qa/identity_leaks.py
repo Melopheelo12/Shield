@@ -4,9 +4,12 @@ Sonde les trois leurres avec des requêtes ordinaires, des méthodes et chemins
 inhabituels et des octets parasites, puis cherche dans toutes les réponses un mot
 qui révélerait la nature du service ou sa pile technique.
 
+Certains chemins portent un marqueur unique : s'il revient dans une réponse, le leurre
+réinjecte ce qu'envoie le visiteur, ce que ses règles interdisent (US-50).
+
     python scripts/qa/identity_leaks.py --host 127.0.0.1 --ssh 2222 --http 8080 --ftp 2121
 
-Code de sortie = nombre de fuites.
+Code de sortie = nombre de fuites et de réinjections.
 """
 
 from __future__ import annotations
@@ -20,8 +23,27 @@ LEAK = re.compile(
     rb"shield|honeypot|honey|decoy|leurre|python|uvicorn|asyncio|traceback", re.IGNORECASE
 )
 
+#: Ne contient aucun mot de ``LEAK`` : seule sa réapparition compte.
+MARKER = b"qa7f3c1e"
+
 HTTP_METHODS = (b"GET", b"HEAD", b"OPTIONS", b"PUT", b"TRACE", b"FOO")
-HTTP_PATHS = (b"/", b"/admin", b"/does-not-exist", b"/../../etc/passwd", b"/.env")
+HTTP_PATHS = (
+    b"/",
+    b"/admin",
+    b"/does-not-exist",
+    b"/../../etc/passwd",
+    b"/.env",
+    b"/" + MARKER,
+    # Faux système de fichiers du leurre HTTP (US-50) : ses chemins, puis un fichier et un
+    # dossier inconnus qui portent le marqueur.
+    b"/wp-config.php.bak",
+    b"/backup",
+    b"/backup/",
+    b"/backup/" + MARKER + b".sql.gz",
+    b"/wp-content/uploads/",
+    b"/wp-content/uploads/2023/",
+    b"/wp-content/uploads/" + MARKER + b"/",
+)
 
 PROBES: dict[str, list[tuple[bytes, ...]]] = {
     "ssh": [(), (b"SSH-2.0-OpenSSH_9.6\r\n",), (b"root:root\r\n",), (b"\x00" * 64,)],
@@ -70,7 +92,7 @@ def main() -> int:
     args = parser.parse_args()
     ports = {"ssh": args.ssh, "http": args.http, "ftp": args.ftp}
 
-    total, leaks, silent = 0, 0, 0
+    total, leaks, echoes, silent = 0, 0, 0, 0
     for service, probes in PROBES.items():
         for chunks in probes:
             reply = talk(args.host, ports[service], chunks)
@@ -80,12 +102,15 @@ def main() -> int:
                 leaks += 1
                 context = reply[max(0, match.start() - 40) : match.end() + 40]
                 print(f"FUITE {service} {chunks[:1]!r} → …{context!r}…")
+            if MARKER in reply:
+                echoes += 1
+                print(f"RÉINJECTION {service} {chunks[:1]!r} → le marqueur revient dans la réponse")
 
-    print(f"{total} sondes, {leaks} fuite(s), {silent} sans réponse")
+    print(f"{total} sondes, {leaks} fuite(s), {echoes} réinjection(s), {silent} sans réponse")
     if silent == total:
         print("ÉCART aucun leurre n'a répondu : vérifiez l'hôte et les ports")
         return 1
-    return leaks
+    return leaks + echoes
 
 
 if __name__ == "__main__":
